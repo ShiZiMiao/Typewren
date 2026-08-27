@@ -97,6 +97,22 @@ async function bootstrap(): Promise<void> {
   /* ---------- 主题 ---------- */
   initThemeToggle(layout.btnThemeToggle)
 
+  /* ---------- 自绘菜单栏：点击顶级项弹出原生子菜单 ---------- */
+  layout.menubar
+    .querySelectorAll<HTMLButtonElement>('.menubar-item')
+    .forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const rect = btn.getBoundingClientRect()
+        window.typewren.popupMenu(
+          btn.dataset.label ?? '',
+          rect.left,
+          rect.bottom
+        )
+        btn.classList.add('open')
+        window.setTimeout(() => btn.classList.remove('open'), 800)
+      })
+    })
+
   /* ---------- 大纲面板折叠状态 ---------- */
   const OUTLINE_KEY = 'typewren.outline-collapsed'
   let outlineCollapsed = localStorage.getItem(OUTLINE_KEY) === '1'

@@ -33,6 +33,9 @@ export interface TypewrenApi {
 
   requestForceClose(): void
 
+  /** 在指定窗口坐标弹出某顶级菜单的子菜单（自绘菜单栏用） */
+  popupMenu(label: string, x: number, y: number): void
+
   onCommand(callback: (name: string, payload?: unknown) => void): () => void
 }
 

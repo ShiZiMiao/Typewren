@@ -2,7 +2,7 @@ import { app, BrowserWindow } from 'electron'
 
 import { createMainWindow } from './window'
 import { attachNativeThemeSync, registerIpcHandlers } from './io'
-import { installApplicationMenu, refreshApplicationMenu } from './menu'
+import { installApplicationMenu, refreshApplicationMenu, registerMenuPopup } from './menu'
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -21,6 +21,7 @@ if (!gotSingleInstanceLock) {
   app.whenReady().then(() => {
     registerIpcHandlers()
     installApplicationMenu()
+    registerMenuPopup()
     attachNativeThemeSync(refreshApplicationMenu)
     mainWindow = createMainWindow()
 

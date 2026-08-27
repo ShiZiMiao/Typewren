@@ -10,7 +10,9 @@
 export interface AppLayout {
   root: HTMLElement
   titlebar: HTMLElement
+  titlebarIcon: HTMLImageElement
   titlebarTitle: HTMLElement
+  menubar: HTMLElement
   app: HTMLElement
   outlinePanel: HTMLElement
   outlineTree: HTMLElement
@@ -34,10 +36,30 @@ export function buildLayout(parent: HTMLElement): AppLayout {
   titlebar.id = 'titlebar'
   titlebar.setAttribute('role', 'toolbar')
 
+  const titlebarIcon = document.createElement('img')
+  titlebarIcon.id = 'titlebar-icon'
+  titlebarIcon.src = './icon.png'
+  titlebarIcon.alt = ''
+  titlebarIcon.draggable = false
+
   const titlebarTitle = document.createElement('span')
   titlebarTitle.id = 'titlebar-title'
   titlebarTitle.textContent = 'Typewren'
-  titlebar.appendChild(titlebarTitle)
+  titlebar.append(titlebarIcon, titlebarTitle)
+
+  /* ---------- 自绘菜单栏（点击弹出原生子菜单） ---------- */
+  const MENU_LABELS = ['文件', '编辑', '格式', '段落', '视图', '帮助']
+  const menubar = document.createElement('div')
+  menubar.id = 'menubar'
+  menubar.setAttribute('role', 'menubar')
+  for (const label of MENU_LABELS) {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'menubar-item'
+    btn.textContent = label
+    btn.dataset.label = label
+    menubar.appendChild(btn)
+  }
 
   const app = document.createElement('div')
   app.id = 'app'
@@ -122,12 +144,14 @@ export function buildLayout(parent: HTMLElement): AppLayout {
     btnThemeToggle
   )
 
-  parent.append(titlebar, app, statusBar)
+  parent.append(titlebar, menubar, app, statusBar)
 
   return {
     root: parent,
     titlebar,
+    titlebarIcon,
     titlebarTitle,
+    menubar,
     app,
     outlinePanel,
     outlineTree,

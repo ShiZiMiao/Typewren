@@ -45,6 +45,9 @@ export interface TypewrenApi {
   /** 渲染进程完成保存后请求真正关闭窗口 */
   requestForceClose(): void
 
+  /** 在指定窗口坐标弹出某顶级菜单的子菜单（自绘菜单栏用） */
+  popupMenu(label: string, x: number, y: number): void
+
   /**
    * 订阅主进程派发的命令（菜单/快捷键触发）。
    * 返回取消订阅函数。
@@ -79,6 +82,9 @@ const api: TypewrenApi = {
   setDirty: (dirty) => ipcRenderer.send('win:set-dirty', dirty),
 
   requestForceClose: () => ipcRenderer.send('win:request-force-close'),
+
+  popupMenu: (label, x, y) =>
+    ipcRenderer.send('menu:popup', { label, x, y }),
 
   onCommand: (callback) => {
     const handler = (

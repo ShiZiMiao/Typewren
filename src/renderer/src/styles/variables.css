@@ -10,6 +10,9 @@
   --titlebar-height: 32px;
   --titlebar-bg: var(--bg-soft);
   --titlebar-text: var(--text-muted);
+  --menubar-height: 28px;
+  --menubar-bg: var(--bg-soft);
+  --menubar-hover: var(--bg-hover);
 
   /* 基础色板（亮色） */
   --bg: #ffffff;

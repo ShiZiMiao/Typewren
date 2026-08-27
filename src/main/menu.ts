@@ -2,6 +2,7 @@ import {
   app,
   BrowserWindow,
   dialog,
+  ipcMain,
   Menu,
   MenuItemConstructorOptions
 } from 'electron'
@@ -139,4 +140,34 @@ export function installApplicationMenu(): void {
  */
 export function refreshApplicationMenu(): void {
   installApplicationMenu()
+}
+
+/** 取某顶级菜单项的子菜单模板（自绘菜单栏弹出用） */
+function getSubmenuTemplate(
+  label: string
+): MenuItemConstructorOptions[] | null {
+  const top = buildTemplate().find((m) => m.label === label)
+  if (!top || !('submenu' in top) || !Array.isArray(top.submenu)) return null
+  return top.submenu as MenuItemConstructorOptions[]
+}
+
+/**
+ * 注册自绘菜单栏的弹出通道：渲染层点击顶级项时，
+ * 由主进程把对应子菜单以原生样式弹出在指定窗口坐标。
+ */
+export function registerMenuPopup(): void {
+  ipcMain.on(
+    'menu:popup',
+    (event, payload: { label: string; x: number; y: number }) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win || win.isDestroyed()) return
+      const sub = getSubmenuTemplate(payload.label)
+      if (!sub) return
+      Menu.buildFromTemplate(sub).popup({
+        window: win,
+        x: payload.x,
+        y: payload.y
+      })
+    }
+  )
 }
