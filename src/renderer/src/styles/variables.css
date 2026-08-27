@@ -31,7 +31,7 @@
   --shadow: 0 4px 16px rgba(20, 30, 45, 0.14);
 
   /* 编辑区 */
-  --editor-max-width: 820px;
+  --editor-max-width: min(90vw, 1200px);
   --code-bg: #f5f6f8;
   --code-border: #e3e7ec;
   --quote-bar: #c8ced6;

@@ -205,9 +205,8 @@
 .ProseMirror table {
   border-collapse: collapse;
   margin: 1em auto;
-  width: fit-content;
-  max-width: 100%;
-  table-layout: fixed;
+  width: 100%;
+  table-layout: auto;
   overflow: hidden;
 }
 
