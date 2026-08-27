@@ -1,6 +1,6 @@
 # Typewren
 
-> 单栏所见即所得（Typora 式）Markdown 桌面编辑器。
+> 单栏所见即所得 Markdown 桌面编辑器。
 > 输入语法即时渲染，仅光标所在节点临时显示原始标记——**没有分栏预览**。
 
 Typewren 基于 Electron + Milkdown（ProseMirror），用原生 TypeScript 渲染层（无前端框架）实现
@@ -10,7 +10,7 @@ Typewren 基于 Electron + Milkdown（ProseMirror），用原生 TypeScript 渲�
 
 ## 特性
 
-- **单栏即时渲染**：写 Markdown 就像用 Typora，输入即所见，不再左右分屏。
+- **单栏即时渲染**：输入即所见，不再左右分屏。
 - **语法高亮**：代码块基于 highlight.js（通过 lowlight → prosemirror-highlight）。
 - **数学公式**：行内 / 块级 LaTeX 公式，KaTeX 渲染（自研节点插件）。
 - **表格工具条**：自研浮动工具条，支持插入 / 增删行列 / 对齐。
