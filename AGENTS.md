@@ -74,10 +74,17 @@ src/
    variables.css 的 `--bg-soft`/`--text-muted` 保持同步）；原生菜单栏随之 `autoHideMenuBar:true`
    （Alt 仍可唤出，快捷键不受影响）。渲染层 `ui/layout.ts` 自绘 `#titlebar`（drag 区域 + 文档标题，
    由 `FileService.onTitleChange` 同步），其背景用 `[data-theme]` 变量，随内容瞬切。
-   主进程 `io.ts` 在 nativeTheme 'updated' 时 `setTitleBarOverlay({color,symbolColor})`
-   即时重绘按钮区（程序化设置无 DWM 渐变）。配色常量集中在 `src/shared/titlebar.ts`。
-   **验证法**：PowerShell + BitBlt 截屏采样标题栏/内容/按钮区像素，三者应在同一 ~8ms 帧内翻转
-   （PrintWindow 会强制渲染掩盖渐变，必须用 BitBlt 取真实屏幕像素）。
+    主进程 `io.ts` 在 nativeTheme 'updated' 时 `setTitleBarOverlay({color,symbolColor})`
+    即时重绘按钮区（程序化设置无 DWM 渐变）。配色常量集中在 `src/shared/titlebar.ts`。
+    **验证法**：PowerShell + BitBlt 截屏采样标题栏/内容/按钮区像素，三者应在同一 ~8ms 帧内翻转
+    （PrintWindow 会强制渲染掩盖渐变，必须用 BitBlt 取真实屏幕像素）。
+    **自绘菜单栏**：`autoHideMenuBar:true` 下原生菜单栏对用户不可见（Alt 也唤不出有效栏），
+    故 `ui/layout.ts` 在 `#titlebar` 下方另建 `#menubar`（文件/编辑/格式/段落/视图/帮助），
+    点击顶级项经 `preload.popupMenu(label,x,y)` → IPC `menu:popup` → 主进程
+    `menu.ts:registerMenuPopup()` 用 `getSubmenuTemplate(label)` 取子菜单并以
+    `Menu.buildFromTemplate(sub).popup({window,x,y})` 在原生样式下弹出（快捷键/加速器仍由
+    `installApplicationMenu` 提供的原生菜单承载，二者并存）。标题栏图标用 `./icon.png`
+    （**必须相对路径**：`loadFile` 下 `/icon.png` 会指向文件系统根导致 404）。
 8. **关闭保护**在主进程 io.ts attachCloseGuard：脏文档 close 时弹原生三选框，
    「保存」→ 发 `save-and-close` 命令 → 渲染层保存成功后调 request-force-close。
 9. **启动基线**：main.ts 初始化末尾必须调用 `fileService.markBaseline()`，
