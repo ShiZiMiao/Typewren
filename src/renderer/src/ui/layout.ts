@@ -9,6 +9,8 @@
 
 export interface AppLayout {
   root: HTMLElement
+  titlebar: HTMLElement
+  titlebarTitle: HTMLElement
   app: HTMLElement
   outlinePanel: HTMLElement
   outlineTree: HTMLElement
@@ -26,6 +28,16 @@ export interface AppLayout {
 
 export function buildLayout(parent: HTMLElement): AppLayout {
   parent.innerHTML = ''
+
+  /* ---------- 自绘标题栏（替代原生标题栏，规避 DWM 渐变） ---------- */
+  const titlebar = document.createElement('div')
+  titlebar.id = 'titlebar'
+  titlebar.setAttribute('role', 'toolbar')
+
+  const titlebarTitle = document.createElement('span')
+  titlebarTitle.id = 'titlebar-title'
+  titlebarTitle.textContent = 'Typewren'
+  titlebar.appendChild(titlebarTitle)
 
   const app = document.createElement('div')
   app.id = 'app'
@@ -110,10 +122,12 @@ export function buildLayout(parent: HTMLElement): AppLayout {
     btnThemeToggle
   )
 
-  parent.append(app, statusBar)
+  parent.append(titlebar, app, statusBar)
 
   return {
     root: parent,
+    titlebar,
+    titlebarTitle,
     app,
     outlinePanel,
     outlineTree,

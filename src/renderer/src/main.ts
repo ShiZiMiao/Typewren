@@ -154,6 +154,9 @@ async function bootstrap(): Promise<void> {
 
   /* ---------- 初始化各模块 ---------- */
   fileService = new FileService(window.typewren, instance.editor)
+  fileService.onTitleChange = (title) => {
+    layout.titlebarTitle.textContent = title
+  }
   sourceMode = new SourceModeController(
     instance.editor,
     fileService,

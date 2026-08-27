@@ -4,8 +4,36 @@
 
 #app {
   display: flex;
-  height: calc(100vh - var(--statusbar-height));
+  margin-top: var(--titlebar-height);
+  height: calc(100vh - var(--titlebar-height) - var(--statusbar-height));
   min-height: 0;
+}
+
+/* ---------- 自绘标题栏 ---------- */
+#titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--titlebar-height);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  padding-right: 152px;
+  background: var(--titlebar-bg);
+  color: var(--titlebar-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  user-select: none;
+  -webkit-app-region: drag;
+  z-index: 100;
+}
+
+#titlebar-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 :root {

@@ -1,6 +1,8 @@
 import { BrowserWindow, ipcMain, dialog, nativeTheme } from 'electron'
 import { promises as fsp } from 'node:fs'
 
+import { TITLEBAR_PALETTE } from '../shared/titlebar'
+
 /** 每个窗口的脏状态（渲染进程通过 IPC 同步） */
 const dirtyMap = new WeakMap<BrowserWindow, boolean>()
 /** 已确认强制关闭（跳过保存保护） */
@@ -176,11 +178,25 @@ export function registerIpcHandlers(): void {
 export function attachNativeThemeSync(refreshMenu: () => void): void {
   nativeTheme.on('updated', () => {
     const dark = nativeTheme.shouldUseDarkColors
+    const palette = dark ? TITLEBAR_PALETTE.dark : TITLEBAR_PALETTE.light
     for (const win of BrowserWindow.getAllWindows()) {
       if (win.isDestroyed()) continue
       win.webContents.send('theme:native-updated', dark)
-      // 强制重设标题触发 DWM 非客户区按新主题重绘（零视觉副作用）
-      if (process.platform === 'win32') win.setTitle(win.getTitle())
+      if (process.platform === 'win32') {
+        // 即时重设标题栏按钮区配色（程序化设置，无 DWM 渐变），
+        // 使标题栏与内容同刻切换
+        const overlay = (win as unknown as {
+          setTitleBarOverlay?: (o: { color: string; symbolColor: string }) => void
+        }).setTitleBarOverlay
+        if (typeof overlay === 'function') {
+          overlay.call(win, {
+            color: palette.color,
+            symbolColor: palette.symbolColor
+          })
+        }
+        // 强制重设标题触发 DWM 非客户区按新主题重绘（零视觉副作用）
+        win.setTitle(win.getTitle())
+      }
     }
     if (process.platform === 'win32') refreshMenu()
   })

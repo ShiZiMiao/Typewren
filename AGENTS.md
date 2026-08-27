@@ -63,12 +63,24 @@ src/
    FileService.onContentReplaced 负责打开/新建后反向同步 textarea。
 6. **主题**：交互切换时以主进程 nativeTheme 为时钟——渲染层发 `theme:set-native` 后
    不立即改 DOM，等主进程 'updated' 广播（`theme:native-updated`）到达再落 `[data-theme]`，
-   使内容与标题栏/菜单栏同刻变色（否则原生端重绘慢半拍，明显不同步）；
-   300ms 超时兜底防 IPC 丢失；启动阶段仍直接落 DOM 防首帧闪错色。
-   主进程收到广播同时重建菜单栏（win32）。CSS 用 `[data-theme]` + `color-scheme` + 滚动条变量。
-7. **关闭保护**在主进程 io.ts attachCloseGuard：脏文档 close 时弹原生三选框，
+   使内容同刻变色；300ms 超时兜底防 IPC 丢失；启动阶段仍直接落 DOM 防首帧闪错色。
+   主进程收到广播同时：重建菜单栏（win32）+ **即时重设 `titleBarOverlay` 配色**。
+   CSS 用 `[data-theme]` + `color-scheme` + 滚动条变量。
+   **标题栏已自绘（见 #9），不再依赖原生标题栏，故标题栏与内容天然同帧切换。**
+7. **标题栏自绘（titleBarOverlay）**：原生标题栏(DWM)在 `nativeTheme` 变化时有约 70ms
+   颜色渐变，Electron 无法关闭，导致标题栏切换明显慢于内容。
+   方案：`window.ts` 在 win32 用 `titleBarStyle:'hidden'` + `titleBarOverlay`
+   （底色/字形色取自 `src/shared/titlebar.ts` 的 `TITLEBAR_PALETTE`，需与
+   variables.css 的 `--bg-soft`/`--text-muted` 保持同步）；原生菜单栏随之 `autoHideMenuBar:true`
+   （Alt 仍可唤出，快捷键不受影响）。渲染层 `ui/layout.ts` 自绘 `#titlebar`（drag 区域 + 文档标题，
+   由 `FileService.onTitleChange` 同步），其背景用 `[data-theme]` 变量，随内容瞬切。
+   主进程 `io.ts` 在 nativeTheme 'updated' 时 `setTitleBarOverlay({color,symbolColor})`
+   即时重绘按钮区（程序化设置无 DWM 渐变）。配色常量集中在 `src/shared/titlebar.ts`。
+   **验证法**：PowerShell + BitBlt 截屏采样标题栏/内容/按钮区像素，三者应在同一 ~8ms 帧内翻转
+   （PrintWindow 会强制渲染掩盖渐变，必须用 BitBlt 取真实屏幕像素）。
+8. **关闭保护**在主进程 io.ts attachCloseGuard：脏文档 close 时弹原生三选框，
    「保存」→ 发 `save-and-close` 命令 → 渲染层保存成功后调 request-force-close。
-8. **启动基线**：main.ts 初始化末尾必须调用 `fileService.markBaseline()`，
+9. **启动基线**：main.ts 初始化末尾必须调用 `fileService.markBaseline()`，
    否则欢迎文档一打开就是脏状态。
 
 ## IPC 通道

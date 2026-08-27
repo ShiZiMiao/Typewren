@@ -6,6 +6,11 @@
 :root {
   color-scheme: light;
 
+  /* 自绘标题栏（与 main 侧 titleBarOverlay 配色保持一致） */
+  --titlebar-height: 32px;
+  --titlebar-bg: var(--bg-soft);
+  --titlebar-text: var(--text-muted);
+
   /* 基础色板（亮色） */
   --bg: #ffffff;
   --bg-soft: #f8f9fb;

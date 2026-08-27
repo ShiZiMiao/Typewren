@@ -29,6 +29,9 @@ export class FileService {
   /** 文档被程序化整体替换后回调（供源码视图刷新自身内容） */
   onContentReplaced: (() => void) | null = null
 
+  /** 标题变化回调（供自绘标题栏同步显示） */
+  onTitleChange: ((title: string) => void) | null = null
+
   constructor(
     private readonly api: TypewrenApi,
     private readonly editor: Editor
@@ -59,6 +62,7 @@ export class FileService {
     const dirtyMark = this.isDirty ? '● ' : ''
     this.api.setTitle(`${dirtyMark}${this.fileName} — Typewren`)
     this.api.setDirty(this.isDirty)
+    this.onTitleChange?.(`${dirtyMark}${this.fileName}`)
   }
 
   private snapshot(): void {
