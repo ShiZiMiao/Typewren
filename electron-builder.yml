@@ -28,3 +28,17 @@ nsis:
   uninstallDisplayName: Typewren
 
 compression: maximum
+
+fileAssociations:
+  - ext: md
+    name: Markdown
+    description: Markdown 文档
+    mimeType: text/markdown
+  - ext: markdown
+    name: Markdown
+    description: Markdown 文档
+    mimeType: text/markdown
+  - ext: mdown
+    name: Markdown
+    description: Markdown 文档
+    mimeType: text/markdown

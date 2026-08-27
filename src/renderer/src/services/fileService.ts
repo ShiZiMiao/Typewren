@@ -131,6 +131,11 @@ export class FileService {
     await this.loadContent(result.path, result.content)
   }
 
+  /** 从指定路径加载文件内容（供文件关联打开使用） */
+  async loadContentFromPath(path: string, content: string): Promise<void> {
+    await this.loadContent(path, content)
+  }
+
   /** 保存。返回 true 表示磁盘内容与当前一致（含另存为成功） */
   async save(): Promise<boolean> {
     if (!this.filePath) return await this.saveAs()

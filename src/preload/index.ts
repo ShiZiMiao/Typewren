@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 export interface OpenFileResult {
   path: string
@@ -55,6 +55,12 @@ export interface TypewrenApi {
   onCommand(
     callback: (name: string, payload?: unknown) => void
   ): () => void
+
+  /** 在新窗口中打开指定文件 */
+  openFileInNewWindow(filePath: string): void
+
+  /** 获取文件的绝对路径（用于拖拽文件） */
+  getPathForFile(file: File): string
 }
 
 const api: TypewrenApi = {
@@ -94,7 +100,12 @@ const api: TypewrenApi = {
     ): void => callback(name, payload)
     ipcRenderer.on('cmd', handler)
     return () => ipcRenderer.off('cmd', handler)
-  }
+  },
+
+  openFileInNewWindow: (filePath) =>
+    ipcRenderer.send('file:open-in-new-window', filePath),
+
+  getPathForFile: (file) => webUtils.getPathForFile(file)
 }
 
 contextBridge.exposeInMainWorld('typewren', api)

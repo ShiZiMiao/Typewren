@@ -158,9 +158,14 @@ async function bootstrap(): Promise<void> {
     }
   }, 120)
 
+  /* ---------- 首次启动显示欢迎页，之后空白 ---------- */
+  const WELCOME_SEEN_KEY = 'typewren.welcome-seen'
+  const isFirstLaunch = !localStorage.getItem(WELCOME_SEEN_KEY)
+  if (isFirstLaunch) localStorage.setItem(WELCOME_SEEN_KEY, '1')
+
   const instance = await createEditor({
     root: layout.editorHost,
-    initialMarkdown: WELCOME_MARKDOWN,
+    initialMarkdown: isFirstLaunch ? WELCOME_MARKDOWN : '',
     onMarkdownUpdated: () => fileService.handleDocUpdated(),
     onViewChanged: () => {
       refreshStatusBar()
@@ -204,6 +209,15 @@ async function bootstrap(): Promise<void> {
         break
       case 'save-and-close':
         void fileService.saveThenClose()
+        break
+
+      case 'open-file-path':
+        if (payload && typeof payload === 'object' && 'path' in payload && 'content' in payload) {
+          void fileService.loadContentFromPath(
+            (payload as { path: string; content: string }).path,
+            (payload as { path: string; content: string }).content
+          ).then(() => outline.refresh())
+        }
         break
 
       /* 格式 */
@@ -280,6 +294,31 @@ async function bootstrap(): Promise<void> {
         break
     }
   })
+
+  /* ---------- 拖拽文件到窗口：新窗口打开 ---------- */
+  const MARKDOWN_EXTS = ['.md', '.markdown', '.mdown']
+
+  const handleDragOver = (e: DragEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  const handleDrop = (e: DragEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const files = Array.from(e.dataTransfer?.files ?? [])
+    for (const file of files) {
+      const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+      if (MARKDOWN_EXTS.includes(ext)) {
+        const filePath = window.typewren.getPathForFile(file)
+        window.typewren.openFileInNewWindow(filePath)
+      }
+    }
+  }
+
+  // 使用捕获阶段，确保在 ProseMirror 处理之前拦截
+  document.addEventListener('dragover', handleDragOver, true)
+  document.addEventListener('drop', handleDrop, true)
 
   instance.focus()
 }

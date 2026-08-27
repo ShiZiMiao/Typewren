@@ -37,6 +37,12 @@ export interface TypewrenApi {
   popupMenu(label: string, x: number, y: number): void
 
   onCommand(callback: (name: string, payload?: unknown) => void): () => void
+
+  /** 在新窗口中打开指定文件 */
+  openFileInNewWindow(filePath: string): void
+
+  /** 获取文件的绝对路径（用于拖拽文件） */
+  getPathForFile(file: File): string
 }
 
 declare global {
