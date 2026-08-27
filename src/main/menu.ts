@@ -8,6 +8,7 @@ import {
 } from 'electron'
 
 import { sendCommand } from './io'
+import { checkForUpdates } from './updater'
 
 function item(
   label: string,
@@ -113,6 +114,11 @@ function buildTemplate(): MenuItemConstructorOptions[] {
     {
       label: '帮助',
       submenu: [
+        {
+          label: '检查更新…',
+          click: () => checkForUpdates(false)
+        },
+        { type: 'separator' },
         {
           label: '关于 Typewren',
           click: () => {

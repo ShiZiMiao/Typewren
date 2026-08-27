@@ -3,6 +3,7 @@ import { app, BrowserWindow } from 'electron'
 import { createMainWindow } from './window'
 import { attachNativeThemeSync, registerIpcHandlers } from './io'
 import { installApplicationMenu, refreshApplicationMenu, registerMenuPopup } from './menu'
+import { checkForUpdates } from './updater'
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -24,6 +25,8 @@ if (!gotSingleInstanceLock) {
     registerMenuPopup()
     attachNativeThemeSync(refreshApplicationMenu)
     mainWindow = createMainWindow()
+
+    setTimeout(() => checkForUpdates(true), 3000)
 
     app.on('activate', () => {
       // macOS: 点击 Dock 图标时若无窗口则重建
