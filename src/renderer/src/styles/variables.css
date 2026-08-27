@@ -1,0 +1,129 @@
+/* ============================================================
+ * Typewren 主题变量 —— 亮色 / 暗色两套 CSS 自定义属性
+ * 切换方式：<html data-theme="dark|light">
+ * ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  /* 基础色板（亮色） */
+  --bg: #ffffff;
+  --bg-soft: #f8f9fb;
+  --bg-hover: #eef1f5;
+  --bg-active: #e4e9f0;
+  --border: #d9dee6;
+  --border-strong: #c3cad4;
+  --text: #24292f;
+  --text-muted: #6a737d;
+  --text-faint: #9aa3ad;
+  --accent: #2f7ef0;
+  --accent-soft: rgba(47, 126, 240, 0.12);
+  --danger: #d9534f;
+  --selection: rgba(47, 126, 240, 0.22);
+  --shadow: 0 4px 16px rgba(20, 30, 45, 0.14);
+
+  /* 编辑区 */
+  --editor-max-width: 820px;
+  --code-bg: #f5f6f8;
+  --code-border: #e3e7ec;
+  --quote-bar: #c8ced6;
+  --table-head-bg: #f2f4f7;
+
+  /* highlight.js token 颜色（亮色，One Light 风） */
+  --hl-keyword: #a626a4;
+  --hl-string: #50a14f;
+  --hl-number: #986801;
+  --hl-comment: #9aa0a6;
+  --hl-function: #4078f2;
+  --hl-type: #c18401;
+  --hl-tag: #e45649;
+  --hl-attr: #986801;
+  --hl-punctuation: #52607a;
+  --hl-variable: #e45649;
+  --hl-meta: #383a42;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #1e2227;
+  --bg-soft: #23282e;
+  --bg-hover: #2c333b;
+  --bg-active: #353d47;
+  --border: #363d46;
+  --border-strong: #47505b;
+  --text: #d7dde4;
+  --text-muted: #8b96a3;
+  --text-faint: #667080;
+  --accent: #58a1ff;
+  --accent-soft: rgba(88, 161, 255, 0.16);
+  --danger: #e06c60;
+  --selection: rgba(88, 161, 255, 0.28);
+  --shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+
+  --code-bg: #171a1f;
+  --code-border: #2b313a;
+  --quote-bar: #4a5563;
+  --table-head-bg: #262c33;
+
+  /* highlight.js token 颜色（暗色，One Dark 风） */
+  --hl-keyword: #c678dd;
+  --hl-string: #98c379;
+  --hl-number: #d19a66;
+  --hl-comment: #6a737d;
+  --hl-function: #61afef;
+  --hl-type: #e5c07b;
+  --hl-tag: #e06c75;
+  --hl-attr: #d19a66;
+  --hl-punctuation: #abb2bf;
+  --hl-variable: #e06c75;
+  --hl-meta: #abb2bf;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family:
+    -apple-system, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC',
+    'Helvetica Neue', Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* ---------- 统一滚动条（跟随主题变量） ---------- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
