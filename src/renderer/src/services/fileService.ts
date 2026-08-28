@@ -56,6 +56,11 @@ export class FileService {
     return normalized.slice(normalized.lastIndexOf('/') + 1)
   }
 
+  /** 获取当前文件路径 */
+  getFilePath(): string | null {
+    return this.filePath
+  }
+
   /* ---------- 内部工具 ---------- */
 
   private refreshTitle(): void {

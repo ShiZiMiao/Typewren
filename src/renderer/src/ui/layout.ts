@@ -19,13 +19,14 @@ export interface AppLayout {
   editorContainer: HTMLElement
   editorHost: HTMLElement
   sourceContainer: HTMLElement
-  sourceTextarea: HTMLTextAreaElement
+  sourceTextarea: HTMLElement
   statusBar: HTMLElement
   wordCountEl: HTMLElement
   cursorPosEl: HTMLElement
   btnSourceToggle: HTMLButtonElement
   btnOutlineToggle: HTMLButtonElement
   btnThemeToggle: HTMLButtonElement
+  searchBarContainer: HTMLElement
 }
 
 export function buildLayout(parent: HTMLElement): AppLayout {
@@ -96,14 +97,19 @@ export function buildLayout(parent: HTMLElement): AppLayout {
   const sourceContainer = document.createElement('div')
   sourceContainer.id = 'source-editor'
 
-  const sourceTextarea = document.createElement('textarea')
+  const sourceTextarea = document.createElement('div')
   sourceTextarea.id = 'source-textarea'
+  sourceTextarea.contentEditable = 'true'
   sourceTextarea.spellcheck = false
-  sourceTextarea.placeholder = 'Markdown 源代码'
+  sourceTextarea.setAttribute('data-placeholder', 'Markdown 源代码')
   sourceTextarea.setAttribute('aria-label', 'Markdown 源代码')
   sourceContainer.appendChild(sourceTextarea)
 
-  app.append(outlinePanel, editorContainer, sourceContainer)
+  /* ---------- 搜索栏容器（由 searchBar 组件挂载，放在 app 内部） ---------- */
+  const searchBarContainer = document.createElement('div')
+  searchBarContainer.id = 'search-bar-container'
+
+  app.append(outlinePanel, editorContainer, sourceContainer, searchBarContainer)
 
   /* ---------- 状态栏 ---------- */
   const statusBar = document.createElement('footer')
@@ -164,6 +170,7 @@ export function buildLayout(parent: HTMLElement): AppLayout {
     cursorPosEl,
     btnSourceToggle,
     btnOutlineToggle,
-    btnThemeToggle
+    btnThemeToggle,
+    searchBarContainer
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "typewren",
   "productName": "Typewren",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Typewren —— 单栏所见即所得 Markdown 桌面编辑器（基于 Electron + Milkdown）",
   "main": "./out/main/index.js",
   "author": "Typewren Team",
@@ -15,22 +15,25 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
-    "dist": "npm run build && electron-builder --win nsis"
+    "dist": "npm run build && electron-builder --win nsis",
+    "test": "npx playwright test"
   },
   "dependencies": {
     "@milkdown/kit": "^7.22.1",
     "@milkdown/plugin-highlight": "^7.22.1",
-    "prosemirror-highlight": "^0.15.0",
-    "lowlight": "^3.3.0",
     "highlight.js": "^11.12.0",
     "katex": "^0.18.0",
+    "lowlight": "^3.3.0",
+    "prosemirror-highlight": "^0.15.0",
     "remark-math": "^6.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^24.0.0",
     "electron": "^44.0.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "playwright": "^1.62.1",
     "typescript": "^5.9.3",
     "vite": "^7.0.0"
   },

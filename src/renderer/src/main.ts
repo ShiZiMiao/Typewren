@@ -36,6 +36,7 @@ import {
 import { SourceModeController } from '@/ui/sourceMode'
 import { updateStatusBar } from '@/ui/statusBar'
 import { initThemeToggle, toggleTheme } from '@/ui/theme'
+import { createSearchBar } from '@/ui/searchBar'
 import { FileService } from '@/services/fileService'
 
 const WELCOME_MARKDOWN = `# 欢迎使用 Typewren
@@ -188,9 +189,27 @@ async function bootstrap(): Promise<void> {
   )
   outline = createOutlinePanel(instance.editor, layout.outlineTree)
 
+  /* ---------- 搜索栏 ---------- */
+  const searchBar = createSearchBar(
+    layout.searchBarContainer,
+    () => sourceMode.isActive,
+    () => layout.sourceTextarea
+  )
+
   outline.refresh()
   refreshStatusBar()
   fileService.markBaseline()
+
+  /* ---------- Ctrl+F 全局快捷键 ---------- */
+  const handleCtrlF = (e: KeyboardEvent): void => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+      e.preventDefault()
+      e.stopPropagation()
+      searchBar.toggle()
+    }
+  }
+  document.addEventListener('keydown', handleCtrlF, true)
+  layout.sourceTextarea.addEventListener('keydown', handleCtrlF)
 
   /* ---------- 主进程命令路由（菜单 / 全局快捷键） ---------- */
   window.typewren.onCommand((name, payload) => {
@@ -319,6 +338,36 @@ async function bootstrap(): Promise<void> {
   // 使用捕获阶段，确保在 ProseMirror 处理之前拦截
   document.addEventListener('dragover', handleDragOver, true)
   document.addEventListener('drop', handleDrop, true)
+
+  /* ---------- 重新加载前保存当前文档状态 ---------- */
+  const RELOAD_STATE_KEY = 'typewren.reload-state'
+
+  window.addEventListener('beforeunload', () => {
+    const filePath = fileService.getFilePath()
+    const markdown = fileService.getRawMarkdown()
+    // 只在有内容时保存
+    if (markdown || filePath) {
+      sessionStorage.setItem(RELOAD_STATE_KEY, JSON.stringify({
+        filePath,
+        markdown
+      }))
+    }
+  })
+
+  // 检查是否有重新加载前保存的状态
+  const savedState = sessionStorage.getItem(RELOAD_STATE_KEY)
+  if (savedState) {
+    sessionStorage.removeItem(RELOAD_STATE_KEY)
+    try {
+      const { filePath, markdown } = JSON.parse(savedState)
+      if (markdown) {
+        await fileService.loadContentFromPath(filePath, markdown)
+        outline.refresh()
+      }
+    } catch {
+      // 解析失败忽略
+    }
+  }
 
   instance.focus()
 }
