@@ -204,7 +204,7 @@ export function createSearchBar(
 
     // 获取滚动容器
     const scrollContainer = getSourceMode()
-      ? getSourceElement()?.parentElement
+      ? getSourceElement()
       : document.getElementById('editor-container')
     if (!scrollContainer) return
 
