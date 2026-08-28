@@ -97,23 +97,6 @@ npm run dist
 
 ---
 
-## 项目结构
-
-```
-src/
-├─ main/            主进程：index / window / menu / io（IPC 与生命周期）
-├─ preload/         contextBridge 暴露 window.typewren
-└─ renderer/
-   ├─ index.html
-   └─ src/
-      ├─ editor/    createEditor / math / highlight / tableTools / taskToggle / actions
-      ├─ ui/        layout / outlinePanel / statusBar / theme / sourceMode
-      ├─ services/  fileService（脏检测 / 保存流 / 关闭保护）
-      └─ styles/    variables（双主题变量）/ layout / editor / widgets
-```
-
----
-
 ## License
 
 MIT
