@@ -161,27 +161,14 @@ export const tableTools = $prose(() => {
         }
       }
 
-      const wrapTables = (): void => {
-        const tables = editorView.dom.querySelectorAll('table')
-        tables.forEach((table) => {
-          if (table.parentElement?.classList.contains('table-scroll-wrapper')) return
-          const wrapper = document.createElement('div')
-          wrapper.className = 'table-scroll-wrapper'
-          table.parentNode?.insertBefore(wrapper, table)
-          wrapper.appendChild(table)
-        })
-      }
-
       window.addEventListener('resize', onReposition)
       window.addEventListener('scroll', onReposition, true)
 
-      wrapTables()
       sync(editorView)
 
       return {
         update(view: EditorView): void {
           activeView = view
-          wrapTables()
           sync(view)
         },
         destroy(): void {

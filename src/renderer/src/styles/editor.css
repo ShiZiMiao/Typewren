@@ -204,35 +204,34 @@
 /* ---------- 表格 ---------- */
 .ProseMirror table {
   border-collapse: collapse;
-  margin: 1em auto;
+  margin: 1em 0;
   width: max-content;
   min-width: 100%;
   table-layout: auto;
-  overflow: hidden;
+  display: table;
 }
 
-.ProseMirror .table-scroll-wrapper {
+.ProseMirror > div:has(table) {
   overflow-x: auto;
-  margin: 1em 0;
   max-width: 100%;
   -webkit-overflow-scrolling: touch;
 }
 
-.ProseMirror .table-scroll-wrapper::-webkit-scrollbar {
+.ProseMirror > div:has(table)::-webkit-scrollbar {
   height: 6px;
 }
 
-.ProseMirror .table-scroll-wrapper::-webkit-scrollbar-track {
+.ProseMirror > div:has(table)::-webkit-scrollbar-track {
   background: var(--bg-soft);
   border-radius: 3px;
 }
 
-.ProseMirror .table-scroll-wrapper::-webkit-scrollbar-thumb {
+.ProseMirror > div:has(table)::-webkit-scrollbar-thumb {
   background: var(--border-strong);
   border-radius: 3px;
 }
 
-.ProseMirror .table-scroll-wrapper::-webkit-scrollbar-thumb:hover {
+.ProseMirror > div:has(table)::-webkit-scrollbar-thumb:hover {
   background: var(--text-faint);
 }
 
@@ -242,7 +241,6 @@
   padding: 7px 12px;
   vertical-align: top;
   min-width: 90px;
-  max-width: 300px;
   position: relative;
   word-break: break-word;
   white-space: normal;
