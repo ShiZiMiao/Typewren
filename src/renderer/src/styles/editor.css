@@ -211,27 +211,28 @@
   display: table;
 }
 
-.ProseMirror > div:has(table) {
+.ProseMirror > div:has(> table) {
   overflow-x: auto;
   max-width: 100%;
   -webkit-overflow-scrolling: touch;
+  margin: 1em 0;
 }
 
-.ProseMirror > div:has(table)::-webkit-scrollbar {
+.ProseMirror > div:has(> table)::-webkit-scrollbar {
   height: 6px;
 }
 
-.ProseMirror > div:has(table)::-webkit-scrollbar-track {
+.ProseMirror > div:has(> table)::-webkit-scrollbar-track {
   background: var(--bg-soft);
   border-radius: 3px;
 }
 
-.ProseMirror > div:has(table)::-webkit-scrollbar-thumb {
+.ProseMirror > div:has(> table)::-webkit-scrollbar-thumb {
   background: var(--border-strong);
   border-radius: 3px;
 }
 
-.ProseMirror > div:has(table)::-webkit-scrollbar-thumb:hover {
+.ProseMirror > div:has(> table)::-webkit-scrollbar-thumb:hover {
   background: var(--text-faint);
 }
 
