@@ -61,6 +61,9 @@ export interface TypewrenApi {
 
   /** 获取文件的绝对路径（用于拖拽文件） */
   getPathForFile(file: File): string
+
+  /** 读取指定路径的文件内容 */
+  readFileContent(filePath: string): Promise<OpenFileResult>
 }
 
 const api: TypewrenApi = {
@@ -105,7 +108,9 @@ const api: TypewrenApi = {
   openFileInNewWindow: (filePath) =>
     ipcRenderer.send('file:open-in-new-window', filePath),
 
-  getPathForFile: (file) => webUtils.getPathForFile(file)
+  getPathForFile: (file) => webUtils.getPathForFile(file),
+
+  readFileContent: (filePath) => ipcRenderer.invoke('file:read-content', filePath)
 }
 
 contextBridge.exposeInMainWorld('typewren', api)

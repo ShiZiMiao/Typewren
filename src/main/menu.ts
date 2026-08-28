@@ -54,7 +54,10 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         { label: '剪切', role: 'cut' },
         { label: '复制', role: 'copy' },
         { label: '粘贴', role: 'paste' },
-        { label: '全选', role: 'selectAll' }
+        { label: '全选', role: 'selectAll' },
+        { type: 'separator' },
+        item('查找…', 'edit:find', 'CmdOrCtrl+F'),
+        item('替换…', 'edit:replace', 'CmdOrCtrl+H')
       ]
     },
     // ---------- 格式 ----------

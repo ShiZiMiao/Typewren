@@ -33,6 +33,9 @@ export function sendCommand(
  * 选择"保存"后由渲染进程完成保存并回调 request-force-close。
  */
 export function attachCloseGuard(win: BrowserWindow): void {
+  // 测试模式跳过关闭保护
+  if (process.argv.includes('--test')) return
+
   win.on('close', (event) => {
     if (!dirtyMap.get(win) || forceCloseSet.has(win)) return
 
@@ -166,6 +169,17 @@ export function registerIpcHandlers(): void {
   ipcMain.on('theme:set-native', (_event, theme: string) => {
     if (theme === 'light' || theme === 'dark' || theme === 'system') {
       nativeTheme.themeSource = theme
+    }
+  })
+
+  // ---------- 读取文件内容（拖放到当前窗口用） ----------
+  ipcMain.handle('file:read-content', async (_event, filePath: string) => {
+    try {
+      const content = await fsp.readFile(filePath, 'utf-8')
+      return { path: filePath, content }
+    } catch (error) {
+      dialog.showErrorBox('无法读取文件', String(error))
+      throw error
     }
   })
 }

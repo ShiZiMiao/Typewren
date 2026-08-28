@@ -43,6 +43,9 @@ export interface TypewrenApi {
 
   /** 获取文件的绝对路径（用于拖拽文件） */
   getPathForFile(file: File): string
+
+  /** 读取指定路径的文件内容 */
+  readFileContent(filePath: string): Promise<{ path: string; content: string }>
 }
 
 declare global {

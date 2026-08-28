@@ -193,23 +193,29 @@ async function bootstrap(): Promise<void> {
   const searchBar = createSearchBar(
     layout.searchBarContainer,
     () => sourceMode.isActive,
-    () => layout.sourceTextarea
+    () => layout.sourceTextarea,
+    instance.editor
   )
 
   outline.refresh()
   refreshStatusBar()
   fileService.markBaseline()
 
-  /* ---------- Ctrl+F 全局快捷键 ---------- */
-  const handleCtrlF = (e: KeyboardEvent): void => {
+  /* ---------- Ctrl+F / Ctrl+H 全局快捷键 ---------- */
+  const handleCtrlFH = (e: KeyboardEvent): void => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
       e.preventDefault()
       e.stopPropagation()
       searchBar.toggle()
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'h') {
+      e.preventDefault()
+      e.stopPropagation()
+      searchBar.toggle()
+      searchBar.toggleReplace()
     }
   }
-  document.addEventListener('keydown', handleCtrlF, true)
-  layout.sourceTextarea.addEventListener('keydown', handleCtrlF)
+  document.addEventListener('keydown', handleCtrlFH, true)
+  layout.sourceTextarea.addEventListener('keydown', handleCtrlFH)
 
   /* ---------- 主进程命令路由（菜单 / 全局快捷键） ---------- */
   window.typewren.onCommand((name, payload) => {
@@ -296,6 +302,15 @@ async function bootstrap(): Promise<void> {
         insertHr(instance.editor)
         break
 
+      /* 编辑 */
+      case 'edit:find':
+        searchBar.toggle()
+        break
+      case 'edit:replace':
+        searchBar.toggle()
+        searchBar.toggleReplace()
+        break
+
       /* 视图 */
       case 'view:source':
         sourceMode.toggle()
@@ -330,7 +345,15 @@ async function bootstrap(): Promise<void> {
       const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
       if (MARKDOWN_EXTS.includes(ext)) {
         const filePath = window.typewren.getPathForFile(file)
-        window.typewren.openFileInNewWindow(filePath)
+        // 当前窗口是空文档则在当前打开，否则新窗口
+        const isEmpty = !fileService.getFilePath() && !fileService.isDirty
+        if (isEmpty) {
+          window.typewren.readFileContent(filePath).then(result => {
+            void fileService.loadContentFromPath(result.path, result.content)
+          })
+        } else {
+          window.typewren.openFileInNewWindow(filePath)
+        }
       }
     }
   }
