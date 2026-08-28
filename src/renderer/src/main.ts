@@ -37,6 +37,7 @@ import { SourceModeController } from '@/ui/sourceMode'
 import { updateStatusBar } from '@/ui/statusBar'
 import { initThemeToggle, toggleTheme } from '@/ui/theme'
 import { createSearchBar } from '@/ui/searchBar'
+import { BackgroundSettingsController } from '@/ui/backgroundSettings'
 import { FileService } from '@/services/fileService'
 
 const WELCOME_MARKDOWN = `# 欢迎使用 Typewren
@@ -196,6 +197,12 @@ async function bootstrap(): Promise<void> {
     () => layout.sourceTextarea,
     instance.editor
   )
+
+  /* ---------- 背景图片设置 ---------- */
+  const backgroundSettings = new BackgroundSettingsController()
+  layout.btnBackgroundSettings.addEventListener('click', () => {
+    backgroundSettings.togglePanel()
+  })
 
   outline.refresh()
   refreshStatusBar()

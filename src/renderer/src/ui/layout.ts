@@ -26,6 +26,7 @@ export interface AppLayout {
   btnSourceToggle: HTMLButtonElement
   btnOutlineToggle: HTMLButtonElement
   btnThemeToggle: HTMLButtonElement
+  btnBackgroundSettings: HTMLButtonElement
   searchBarContainer: HTMLElement
 }
 
@@ -141,12 +142,18 @@ export function buildLayout(parent: HTMLElement): AppLayout {
   btnThemeToggle.title = '切换亮色 / 暗色主题'
   btnThemeToggle.textContent = '☾ 暗色'
 
+  const btnBackgroundSettings = document.createElement('button')
+  btnBackgroundSettings.type = 'button'
+  btnBackgroundSettings.title = '背景图片设置'
+  btnBackgroundSettings.textContent = '🖼 背景'
+
   statusBar.append(
     btnSourceToggle,
     btnOutlineToggle,
     wordCountEl,
     spacer,
     cursorPosEl,
+    btnBackgroundSettings,
     btnThemeToggle
   )
 
@@ -171,6 +178,7 @@ export function buildLayout(parent: HTMLElement): AppLayout {
     btnSourceToggle,
     btnOutlineToggle,
     btnThemeToggle,
+    btnBackgroundSettings,
     searchBarContainer
   }
 }

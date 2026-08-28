@@ -409,3 +409,237 @@
   background: var(--bg-hover);
   border-color: var(--accent);
 }
+
+/* ---------- 背景图片支持 ---------- */
+#app.has-background #editor-container,
+#app.has-background #source-editor {
+  position: relative;
+}
+
+#app.has-background #editor-container::before,
+#app.has-background #source-editor::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: var(--bg-image-url);
+  background-size: var(--bg-image-size, cover);
+  background-position: var(--bg-image-position, center);
+  background-repeat: no-repeat;
+  opacity: var(--bg-image-opacity, 0.3);
+  filter: blur(var(--bg-image-blur, 0));
+  pointer-events: none;
+  z-index: 0;
+}
+
+#app.has-background #editor-container > *,
+#app.has-background #source-editor > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------- 背景图片设置面板 ---------- */
+.bg-settings-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.bg-settings-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.bg-settings-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 420px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  z-index: 1001;
+  padding: 20px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.bg-settings-panel.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.bg-settings-title {
+  margin: 0 0 20px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.bg-settings-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bg-settings-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.bg-settings-section {
+  margin-bottom: 16px;
+}
+
+.bg-settings-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.bg-settings-value {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.bg-settings-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.bg-settings-url-input {
+  flex: 1;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+
+.bg-settings-url-input:focus {
+  border-color: var(--accent);
+}
+
+.bg-settings-file-btn,
+.bg-settings-clear-btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bg-settings-file-btn:hover,
+.bg-settings-clear-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.bg-settings-slider {
+  width: 100%;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border);
+  border-radius: 3px;
+  outline: none;
+}
+
+.bg-settings-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--accent);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.bg-settings-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--accent);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.bg-settings-btn-group {
+  display: flex;
+  gap: 8px;
+}
+
+.bg-settings-size-btn {
+  flex: 1;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bg-settings-size-btn:hover {
+  border-color: var(--accent);
+}
+
+.bg-settings-size-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.bg-settings-reset {
+  width: 100%;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.bg-settings-reset:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
