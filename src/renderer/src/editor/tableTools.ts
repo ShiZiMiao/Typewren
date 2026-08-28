@@ -161,10 +161,26 @@ export const tableTools = $prose(() => {
         }
       }
 
+      // 为表格添加滚动包装器（只在初始化时执行一次）
+      const wrapExistingTables = (): void => {
+        const tables = editorView.dom.querySelectorAll('table')
+        tables.forEach((table) => {
+          if (table.parentElement?.classList.contains('table-scroll-wrapper')) return
+          const wrapper = document.createElement('div')
+          wrapper.className = 'table-scroll-wrapper'
+          table.parentNode?.insertBefore(wrapper, table)
+          wrapper.appendChild(table)
+        })
+      }
+
       window.addEventListener('resize', onReposition)
       window.addEventListener('scroll', onReposition, true)
 
-      sync(editorView)
+      // 延迟执行，确保 DOM 已经渲染完成
+      requestAnimationFrame(() => {
+        wrapExistingTables()
+        sync(editorView)
+      })
 
       return {
         update(view: EditorView): void {
