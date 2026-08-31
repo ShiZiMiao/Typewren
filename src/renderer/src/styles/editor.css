@@ -205,8 +205,7 @@
 .ProseMirror table {
   border-collapse: collapse;
   margin: 0;
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
   table-layout: auto;
   display: table;
 }
@@ -241,9 +240,11 @@
   border: 1px solid var(--border-strong);
   padding: 7px 12px;
   vertical-align: top;
-  min-width: 90px;
+  min-width: 60px;
+  max-width: 200px;
   position: relative;
   word-break: break-word;
+  overflow-wrap: break-word;
   white-space: normal;
 }
 
