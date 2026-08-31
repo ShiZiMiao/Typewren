@@ -8,7 +8,7 @@
   line-height: 1.75;
   word-wrap: break-word;
   caret-color: var(--accent);
-  overflow-x: auto;
+  overflow-x: visible;
 }
 
 .ProseMirror ::selection {
@@ -203,12 +203,20 @@
 }
 
 /* ---------- 表格 ---------- */
+/* nodeView 包裹层 .table-scroll-wrapper 承载横向滚动；
+   内层 table 保持 display:table（原生表格布局，列宽自适应）。 */
+.table-scroll-wrapper {
+  overflow-x: auto;
+  width: 100%;
+  min-width: 100%;
+  cursor: default;
+}
+
 .ProseMirror table {
   border-collapse: collapse;
   margin: 1em 0;
   width: max-content;
   min-width: 100%;
-  table-layout: auto;
 }
 
 .ProseMirror th,
@@ -219,6 +227,7 @@
   min-width: 80px;
   position: relative;
   white-space: nowrap;
+  cursor: text;
 }
 
 .ProseMirror th {

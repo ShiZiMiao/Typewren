@@ -117,6 +117,21 @@ export async function createEditor(
           ...prev.attributes,
           spellcheck: 'false',
           class: 'typewren-prosemirror'
+        },
+        nodeViews: {
+          table: (_node, _view, _getPos) => {
+            const wrapper = document.createElement('div')
+            wrapper.className = 'table-scroll-wrapper'
+            const table = document.createElement('table')
+            const tbody = document.createElement('tbody')
+            table.appendChild(tbody)
+            wrapper.appendChild(table)
+            return {
+              dom: wrapper,
+              contentDOM: tbody,
+              update: (n) => n.type.name === 'table'
+            }
+          }
         }
       }))
 
