@@ -205,8 +205,6 @@ export const tableTools = $prose(() => {
       return {
         update(view: EditorView): void {
           activeView = view
-          // 更新表格包装
-          wrapExistingTables()
           sync(view)
         },
         destroy(): void {
