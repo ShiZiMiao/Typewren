@@ -210,6 +210,15 @@
   display: table;
 }
 
+.ProseMirror th,
+.ProseMirror td {
+  border: 1px solid var(--border-strong);
+  padding: 7px 12px;
+  vertical-align: top;
+  min-width: 60px;
+  position: relative;
+}
+
 .ProseMirror .table-scroll-wrapper {
   max-width: 100%;
   margin: 1em 0;
@@ -245,11 +254,7 @@
 /* 滚动模式：不换行 */
 .ProseMirror .table-scroll-mode th,
 .ProseMirror .table-scroll-mode td {
-  border: 1px solid var(--border-strong);
-  padding: 7px 12px;
-  vertical-align: top;
   min-width: 80px;
-  position: relative;
   white-space: nowrap;
 }
 
@@ -260,12 +265,7 @@
 /* 换行模式：自动换行 */
 .ProseMirror .table-wrap-mode th,
 .ProseMirror .table-wrap-mode td {
-  border: 1px solid var(--border-strong);
-  padding: 7px 12px;
-  vertical-align: top;
-  min-width: 60px;
   max-width: 200px;
-  position: relative;
   white-space: normal;
   word-break: break-word;
   overflow-wrap: break-word;
