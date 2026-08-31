@@ -161,46 +161,10 @@ export const tableTools = $prose(() => {
         }
       }
 
-      // 为表格添加滚动包装器，并根据宽度决定是否换行
-      const wrapExistingTables = (): void => {
-        const tables = editorView.dom.querySelectorAll('table')
-        tables.forEach((table) => {
-          if (table.parentElement?.classList.contains('table-scroll-wrapper')) {
-            // 已包装，更新换行策略
-            updateTableWrap(table as HTMLTableElement, table.parentElement as HTMLElement)
-            return
-          }
-          const wrapper = document.createElement('div')
-          wrapper.className = 'table-scroll-wrapper'
-          table.parentNode?.insertBefore(wrapper, table)
-          wrapper.appendChild(table)
-          updateTableWrap(table as HTMLTableElement, wrapper)
-        })
-      }
-
-      const updateTableWrap = (table: HTMLTableElement, wrapper: HTMLElement): void => {
-        const containerWidth = editorView.dom.clientWidth - 40 // 减去 padding
-        const tableWidth = table.scrollWidth
-
-        if (tableWidth > containerWidth * 1.5) {
-          // 超出1.5倍，使用滚动
-          wrapper.classList.remove('table-wrap-mode')
-          wrapper.classList.add('table-scroll-mode')
-        } else {
-          // 否则换行显示
-          wrapper.classList.remove('table-scroll-mode')
-          wrapper.classList.add('table-wrap-mode')
-        }
-      }
-
       window.addEventListener('resize', onReposition)
       window.addEventListener('scroll', onReposition, true)
 
-      // 延迟执行，确保 DOM 已经渲染完成
-      requestAnimationFrame(() => {
-        wrapExistingTables()
-        sync(editorView)
-      })
+      sync(editorView)
 
       return {
         update(view: EditorView): void {
