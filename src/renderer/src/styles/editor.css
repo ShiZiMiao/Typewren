@@ -205,16 +205,23 @@
 .ProseMirror table {
   border-collapse: collapse;
   margin: 0;
-  width: max-content;
+  width: 100%;
   table-layout: auto;
   display: table;
 }
 
 .ProseMirror .table-scroll-wrapper {
-  overflow-x: auto;
   max-width: 100%;
-  -webkit-overflow-scrolling: touch;
   margin: 1em 0;
+}
+
+.ProseMirror .table-scroll-wrapper.table-scroll-mode {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ProseMirror .table-scroll-wrapper.table-wrap-mode {
+  overflow-x: visible;
 }
 
 .ProseMirror .table-scroll-wrapper::-webkit-scrollbar {
@@ -235,14 +242,33 @@
   background: var(--text-faint);
 }
 
-.ProseMirror th,
-.ProseMirror td {
+/* 滚动模式：不换行 */
+.ProseMirror .table-scroll-mode th,
+.ProseMirror .table-scroll-mode td {
   border: 1px solid var(--border-strong);
   padding: 7px 12px;
   vertical-align: top;
   min-width: 80px;
   position: relative;
   white-space: nowrap;
+}
+
+.ProseMirror .table-scroll-mode table {
+  width: max-content;
+}
+
+/* 换行模式：自动换行 */
+.ProseMirror .table-wrap-mode th,
+.ProseMirror .table-wrap-mode td {
+  border: 1px solid var(--border-strong);
+  padding: 7px 12px;
+  vertical-align: top;
+  min-width: 60px;
+  max-width: 200px;
+  position: relative;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .ProseMirror th {
