@@ -187,16 +187,16 @@
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   background: var(--bg);
   scrollbar-gutter: stable;
 }
 
 #editor-container .ProseMirror {
-  max-width: var(--editor-max-width);
   margin: 0 auto;
   padding: 44px 56px 45vh;
   outline: none;
+  min-width: var(--editor-max-width);
 }
 
 /* ---------- 源代码视图（与编辑区互斥） ---------- */
