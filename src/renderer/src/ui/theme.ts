@@ -7,6 +7,9 @@
 
 const STORAGE_KEY = 'typewren.theme'
 
+/** 交互切换后等待主进程 nativeTheme 广播的超时兜底（防止 IPC 丢失卡在旧配色） */
+const NATIVE_SYNC_FALLBACK_MS = 300
+
 export type ThemeName = 'light' | 'dark'
 type ThemePreference = ThemeName | 'system'
 
@@ -49,7 +52,7 @@ export function applyPreference(preference: ThemePreference): ThemeName {
     fallbackTimer = window.setTimeout(() => {
       fallbackTimer = null
       applyToDom(resolved)
-    }, 300)
+    }, NATIVE_SYNC_FALLBACK_MS)
   }
 
   window.typewren.setNativeTheme(preference)

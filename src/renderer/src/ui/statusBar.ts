@@ -1,11 +1,13 @@
 import type { Editor } from '@milkdown/kit/core'
 import { editorViewCtx } from '@milkdown/kit/core'
-import type { Node as ProseNode } from '@milkdown/kit/prose/model'
 
 export interface StatusBarRefs {
   wordCountEl: HTMLElement
   cursorPosEl: HTMLElement
 }
+
+/** 状态栏高频输入时的节流等待 */
+const UPDATE_THROTTLE_MS = 80
 
 /** 统计：中文字符按字计，西文按单词计 */
 function countWords(text: string): number {
@@ -41,7 +43,7 @@ export function updateStatusBar(
       // 渲染模式：基于 Milkdown 文档
       editor.action((ctx) => {
         const state = ctx.get(editorViewCtx).state
-        const doc = state.doc as ProseNode
+        const doc = state.doc
         text = doc.textBetween(0, doc.content.size, '\n', '\ufffd')
         prefix = doc.textBetween(0, state.selection.from, '\n', '\ufffd')
       })
@@ -55,5 +57,5 @@ export function updateStatusBar(
 
     const { line, col } = prefixToLineCol(prefix)
     refs.cursorPosEl.textContent = `行 ${line}，列 ${col}`
-  }, 80)
+  }, UPDATE_THROTTLE_MS)
 }

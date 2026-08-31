@@ -1,10 +1,7 @@
 import type { Editor } from '@milkdown/kit/core'
 
 import type { TypewrenApi } from '../env.d'
-import {
-  getMarkdown,
-  setMarkdown as replaceDocument
-} from '../editor/actions'
+import { getMarkdown, setMarkdown } from '../editor/actions'
 
 /* ============================================================
  * 文件服务：新建 / 打开 / 保存 / 另存为 + 脏状态与窗口标题管理
@@ -81,7 +78,7 @@ export class FileService {
     this.sourceAccessor = null
     this.suppressDirty = true
     try {
-      replaceDocument(this.editor, content)
+      setMarkdown(this.editor, content)
       // replaceAll 是异步事务，等待一帧让 markdownUpdated 触发完毕
       await new Promise((resolve) => requestAnimationFrame(resolve))
     } finally {

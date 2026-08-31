@@ -87,8 +87,10 @@ export async function checkForUpdates(silent = false): Promise<void> {
   const setupAsset = release.assets.find(a => a.name.endsWith('.exe'))
   const sizeStr = setupAsset ? `\n大小: ${formatBytes(setupAsset.size)}` : ''
 
-  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
-  const choice = dialog.showMessageBoxSync(win!, {
+  const win =
+    BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+  if (!win) return
+  const choice = dialog.showMessageBoxSync(win, {
     type: 'info',
     title: 'Typewren - 发现新版本',
     message: `发现新版本 v${latestVersion}`,

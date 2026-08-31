@@ -8,6 +8,9 @@ import { $prose } from '@milkdown/kit/utils'
  * 此插件在勾选框热区（左侧 30px）拦截点击，翻转 checked 属性。
  * ============================================================ */
 
+/** 勾选框热区宽度（与 CSS ::before 绘制的方框宽度对齐） */
+const CHECKBOX_HOTZONE_PX = 30
+
 export const taskListToggle = $prose(() => {
   return new Plugin({
     props: {
@@ -22,9 +25,11 @@ export const taskListToggle = $prose(() => {
 
         // 仅命中左侧勾选框热区时切换，其余区域保持正常文本编辑
         const rect = li.getBoundingClientRect()
-        if (event.clientX - rect.left > 30) return false
+        if (event.clientX - rect.left > CHECKBOX_HOTZONE_PX) return false
 
         const innerPos = view.posAtDOM(li, 0)
+        // posAtDOM 取不到位置时返回 -1，直接忽略
+        if (innerPos < 0) return false
         const $pos = view.state.doc.resolve(innerPos)
 
         let depth = $pos.depth

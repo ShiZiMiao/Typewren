@@ -9,10 +9,12 @@ import {
 
 import { sendCommand } from './io'
 import { checkForUpdates } from './updater'
+import { MENU_TOP_LABELS } from '../shared/menu'
+import type { CommandName } from '../shared/ipc'
 
 function item(
   label: string,
-  command: string,
+  command: CommandName,
   accelerator?: string,
   payload?: unknown
 ): MenuItemConstructorOptions {
@@ -33,7 +35,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
   return [
     // ---------- 文件 ----------
     {
-      label: '文件',
+      label: MENU_TOP_LABELS[0],
       submenu: [
         item('新建', 'new-file', 'CmdOrCtrl+N'),
         item('打开…', 'open-file', 'CmdOrCtrl+O'),
@@ -46,7 +48,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
     },
     // ---------- 编辑 ----------
     {
-      label: '编辑',
+      label: MENU_TOP_LABELS[1],
       submenu: [
         { label: '撤销', role: 'undo' },
         { label: '重做', role: 'redo' },
@@ -62,7 +64,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
     },
     // ---------- 格式 ----------
     {
-      label: '格式',
+      label: MENU_TOP_LABELS[2],
       submenu: [
         item('加粗', 'format:bold', 'CmdOrCtrl+B'),
         item('斜体', 'format:italic', 'CmdOrCtrl+I'),
@@ -75,7 +77,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
     },
     // ---------- 段落 ----------
     {
-      label: '段落',
+      label: MENU_TOP_LABELS[3],
       submenu: [
         item('一级标题', 'heading', 'CmdOrCtrl+1', 1),
         item('二级标题', 'heading', 'CmdOrCtrl+2', 2),
@@ -98,7 +100,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
     },
     // ---------- 视图 ----------
     {
-      label: '视图',
+      label: MENU_TOP_LABELS[4],
       submenu: [
         item('源代码模式', 'view:source', 'CmdOrCtrl+/'),
         item('大纲面板', 'view:outline', 'CmdOrCtrl+\\'),
@@ -115,7 +117,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
     },
     // ---------- 帮助 ----------
     {
-      label: '帮助',
+      label: MENU_TOP_LABELS[5],
       submenu: [
         {
           label: '检查更新…',

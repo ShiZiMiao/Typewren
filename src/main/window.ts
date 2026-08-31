@@ -5,12 +5,18 @@ import { app, BrowserWindow, shell } from 'electron'
 import { attachCloseGuard } from './io'
 import { TITLEBAR_PALETTE } from '../shared/titlebar'
 
+/** 默认窗口尺寸与最小尺寸 */
+const WINDOW_WIDTH = 1200
+const WINDOW_HEIGHT = 800
+const WINDOW_MIN_WIDTH = 720
+const WINDOW_MIN_HEIGHT = 480
+
 export function createMainWindow(): BrowserWindow {
   const winOptions: Electron.BrowserWindowConstructorOptions = {
-    width: 1200,
-    height: 800,
-    minWidth: 720,
-    minHeight: 480,
+    width: WINDOW_WIDTH,
+    height: WINDOW_HEIGHT,
+    minWidth: WINDOW_MIN_WIDTH,
+    minHeight: WINDOW_MIN_HEIGHT,
     show: false,
     title: 'Typewren',
     backgroundColor: '#f8f9fb',
@@ -45,9 +51,17 @@ export function createMainWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => win.show())
 
-  // 外部链接一律交给系统默认浏览器，绝不在应用内打开
+  // 外部链接一律交给系统默认浏览器，绝不在应用内打开；
+  // 仅放行 http/https，拒绝 file:/javascript: 等可被滥用的协议
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    try {
+      const protocol = new URL(url).protocol
+      if (protocol === 'http:' || protocol === 'https:') {
+        void shell.openExternal(url)
+      }
+    } catch {
+      // URL 解析失败（非法地址）一律忽略
+    }
     return { action: 'deny' }
   })
 

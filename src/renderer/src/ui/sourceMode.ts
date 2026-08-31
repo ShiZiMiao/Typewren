@@ -2,6 +2,7 @@ import type { Editor } from '@milkdown/kit/core'
 
 import { setMarkdown } from '../editor/actions'
 import type { FileService } from '../services/fileService'
+import { insertTextViaInputEvent } from '../util/inputEvent'
 
 /* ============================================================
  * 源代码 / 渲染视图切换控制器
@@ -37,7 +38,7 @@ export class SourceModeController {
     this.sourceEl.addEventListener('keydown', (event) => {
       if (event.key === 'Tab') {
         event.preventDefault()
-        document.execCommand('insertText', false, '  ')
+        insertTextViaInputEvent(this.sourceEl, '  ')
         this.fileService.handleDocUpdated()
         this.onStateChange()
       }

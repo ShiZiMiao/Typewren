@@ -14,20 +14,6 @@ import './styles/editor.css'
 import './styles/widgets.css'
 
 import { createEditor } from '@/editor/createEditor'
-import {
-  insertHr,
-  insertImage,
-  insertMathBlock,
-  insertOrUpdateLink,
-  insertTable,
-  insertTaskItem,
-  makeCodeBlock,
-  setHeadingLevel,
-  toggleBlockquote,
-  toggleTextMark,
-  wrapInListKind,
-  insertMathInline
-} from '@/editor/actions'
 import { buildLayout } from '@/ui/layout'
 import {
   activeHeadingIndex,
@@ -35,10 +21,17 @@ import {
 } from '@/ui/outlinePanel'
 import { SourceModeController } from '@/ui/sourceMode'
 import { updateStatusBar } from '@/ui/statusBar'
-import { initThemeToggle, toggleTheme } from '@/ui/theme'
+import { initThemeToggle } from '@/ui/theme'
 import { createSearchBar } from '@/ui/searchBar'
 import { BackgroundSettingsController } from '@/ui/backgroundSettings'
 import { FileService } from '@/services/fileService'
+import { registerCommandRouter } from '@/commandRouter'
+import { isMarkdownPath } from '../../shared/ipc'
+
+/** 大纲刷新防抖等待 */
+const OUTLINE_DEBOUNCE_MS = 120
+/** 自绘菜单栏点击后去掉高亮的延时 */
+const MENUBAR_HIGHLIGHT_MS = 800
 
 const WELCOME_MARKDOWN = `# 欢迎使用 Typewren
 
@@ -111,7 +104,7 @@ async function bootstrap(): Promise<void> {
           rect.bottom
         )
         btn.classList.add('open')
-        window.setTimeout(() => btn.classList.remove('open'), 800)
+        window.setTimeout(() => btn.classList.remove('open'), MENUBAR_HIGHLIGHT_MS)
       })
     })
 
@@ -121,7 +114,7 @@ async function bootstrap(): Promise<void> {
 
   const applyOutlineState = (): void => {
     layout.app.classList.toggle('outline-collapsed', outlineCollapsed)
-    layout.btnOutlineToggle.textContent = outlineCollapsed ? '☰ 大纲' : '☰ 大纲'
+    layout.btnOutlineToggle.textContent = '☰ 大纲'
     localStorage.setItem(OUTLINE_KEY, outlineCollapsed ? '1' : '0')
   }
   applyOutlineState()
@@ -158,7 +151,7 @@ async function bootstrap(): Promise<void> {
     } else {
       outline.setActive(null)
     }
-  }, 120)
+  }, OUTLINE_DEBOUNCE_MS)
 
   /* ---------- 首次启动显示欢迎页，之后空白 ---------- */
   const WELCOME_SEEN_KEY = 'typewren.welcome-seen'
@@ -225,120 +218,17 @@ async function bootstrap(): Promise<void> {
   layout.sourceTextarea.addEventListener('keydown', handleCtrlFH)
 
   /* ---------- 主进程命令路由（菜单 / 全局快捷键） ---------- */
-  window.typewren.onCommand((name, payload) => {
-    switch (name) {
-      case 'new-file':
-        void fileService.newFile().then(() => outline.refresh())
-        break
-      case 'open-file':
-        void fileService.openFile().then(() => outline.refresh())
-        break
-      case 'save':
-        void fileService.save()
-        break
-      case 'save-as':
-        void fileService.saveAs()
-        break
-      case 'save-and-close':
-        void fileService.saveThenClose()
-        break
-
-      case 'open-file-path':
-        if (payload && typeof payload === 'object' && 'path' in payload && 'content' in payload) {
-          void fileService.loadContentFromPath(
-            (payload as { path: string; content: string }).path,
-            (payload as { path: string; content: string }).content
-          ).then(() => outline.refresh())
-        }
-        break
-
-      /* 格式 */
-      case 'format:bold':
-        toggleTextMark(instance.editor, 'strong')
-        break
-      case 'format:italic':
-        toggleTextMark(instance.editor, 'emphasis')
-        break
-      case 'format:strike':
-        toggleTextMark(instance.editor, 'strikethrough')
-        break
-      case 'format:inline-code':
-        toggleTextMark(instance.editor, 'inlineCode')
-        break
-      case 'format:link':
-        void insertOrUpdateLink(instance.editor)
-        break
-      case 'format:image':
-        void insertImage(instance.editor)
-        break
-
-      /* 标题与列表 */
-      case 'heading':
-        setHeadingLevel(
-          instance.editor,
-          typeof payload === 'number' ? payload : 0
-        )
-        break
-      case 'list:bullet':
-        wrapInListKind(instance.editor, 'bullet')
-        break
-      case 'list:number':
-        wrapInListKind(instance.editor, 'ordered')
-        break
-      case 'list:task':
-        insertTaskItem(instance.editor)
-        break
-
-      /* 块级插入 */
-      case 'block:quote':
-        toggleBlockquote(instance.editor)
-        break
-      case 'block:code':
-        makeCodeBlock(instance.editor)
-        break
-      case 'block:math':
-        insertMathBlock(instance.editor)
-        break
-      case 'block:math-inline':
-        insertMathInline(instance.editor)
-        break
-      case 'insert:table':
-        insertTable(instance.editor)
-        break
-      case 'insert:hr':
-        insertHr(instance.editor)
-        break
-
-      /* 编辑 */
-      case 'edit:find':
-        searchBar.toggle()
-        break
-      case 'edit:replace':
-        searchBar.toggle()
-        searchBar.toggleReplace()
-        break
-
-      /* 视图 */
-      case 'view:source':
-        sourceMode.toggle()
-        break
-      case 'view:outline':
-        toggleOutlinePanel()
-        break
-      case 'view:theme': {
-        layout.btnThemeToggle.textContent =
-          toggleTheme() === 'dark' ? '☀ 亮色' : '☾ 暗色'
-        break
-      }
-
-      default:
-        break
-    }
+  registerCommandRouter({
+    editor: instance.editor,
+    fileService,
+    sourceMode,
+    outline,
+    searchBar,
+    layout,
+    toggleOutlinePanel
   })
 
   /* ---------- 拖拽文件到窗口：新窗口打开 ---------- */
-  const MARKDOWN_EXTS = ['.md', '.markdown', '.mdown']
-
   const handleDragOver = (e: DragEvent): void => {
     e.preventDefault()
     e.stopPropagation()
@@ -349,18 +239,18 @@ async function bootstrap(): Promise<void> {
     e.stopPropagation()
     const files = Array.from(e.dataTransfer?.files ?? [])
     for (const file of files) {
-      const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
-      if (MARKDOWN_EXTS.includes(ext)) {
-        const filePath = window.typewren.getPathForFile(file)
-        // 当前窗口是空文档则在当前打开，否则新窗口
-        const isEmpty = !fileService.getFilePath() && !fileService.isDirty
-        if (isEmpty) {
-          window.typewren.readFileContent(filePath).then(result => {
+      if (!isMarkdownPath(file.name)) continue
+      const filePath = window.typewren.getPathForFile(file)
+      // 当前窗口是空文档则在当前打开，否则新窗口
+      const isEmpty = !fileService.getFilePath() && !fileService.isDirty
+      if (isEmpty) {
+        void window.typewren.readFileContent(filePath).then((result) => {
+          if (result) {
             void fileService.loadContentFromPath(result.path, result.content)
-          })
-        } else {
-          window.typewren.openFileInNewWindow(filePath)
-        }
+          }
+        })
+      } else {
+        window.typewren.openFileInNewWindow(filePath)
       }
     }
   }
@@ -377,10 +267,10 @@ async function bootstrap(): Promise<void> {
     const markdown = fileService.getRawMarkdown()
     // 只在有内容时保存
     if (markdown || filePath) {
-      sessionStorage.setItem(RELOAD_STATE_KEY, JSON.stringify({
-        filePath,
-        markdown
-      }))
+      sessionStorage.setItem(
+        RELOAD_STATE_KEY,
+        JSON.stringify({ filePath, markdown })
+      )
     }
   })
 
@@ -389,9 +279,16 @@ async function bootstrap(): Promise<void> {
   if (savedState) {
     sessionStorage.removeItem(RELOAD_STATE_KEY)
     try {
-      const { filePath, markdown } = JSON.parse(savedState)
-      if (markdown) {
-        await fileService.loadContentFromPath(filePath, markdown)
+      const parsed = JSON.parse(savedState) as {
+        filePath?: unknown
+        markdown?: unknown
+      }
+      const { filePath, markdown } = parsed
+      if (typeof markdown === 'string' && markdown) {
+        await fileService.loadContentFromPath(
+          typeof filePath === 'string' ? filePath : '',
+          markdown
+        )
         outline.refresh()
       }
     } catch {

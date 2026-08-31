@@ -2,17 +2,18 @@ import { BrowserWindow, ipcMain, dialog, nativeTheme } from 'electron'
 import { promises as fsp } from 'node:fs'
 
 import { TITLEBAR_PALETTE } from '../shared/titlebar'
+import {
+  MD_FILTERS,
+  type CommandName,
+  type FileContentPayload,
+  type SaveAsPayload,
+  type SaveAsResult
+} from '../shared/ipc'
 
 /** 每个窗口的脏状态（渲染进程通过 IPC 同步） */
 const dirtyMap = new WeakMap<BrowserWindow, boolean>()
 /** 已确认强制关闭（跳过保存保护） */
 const forceCloseSet = new WeakSet<BrowserWindow>()
-
-const MD_FILTERS = [
-  { name: 'Markdown 文档', extensions: ['md', 'markdown', 'mdown'] },
-  { name: '文本文件', extensions: ['txt'] },
-  { name: '所有文件', extensions: ['*'] }
-]
 
 function winOf(sender: Electron.WebContents): BrowserWindow | null {
   return BrowserWindow.fromWebContents(sender)
@@ -21,10 +22,28 @@ function winOf(sender: Electron.WebContents): BrowserWindow | null {
 /** 向指定窗口的渲染进程派发一条命令 */
 export function sendCommand(
   win: BrowserWindow,
-  name: string,
+  name: CommandName,
   payload?: unknown
 ): void {
   if (!win.isDestroyed()) win.webContents.send('cmd', name, payload)
+}
+
+/**
+ * 读取文件并派发给指定窗口打开。
+ * 统一处理读取失败（弹错误框，不抛出），供文件关联打开 / 二次实例 / 新窗口打开复用。
+ */
+export async function openPathInWindow(
+  win: BrowserWindow,
+  filePath: string
+): Promise<void> {
+  try {
+    const content = await fsp.readFile(filePath, 'utf-8')
+    if (!win.isDestroyed()) {
+      sendCommand(win, 'open-file-path', { path: filePath, content })
+    }
+  } catch (error) {
+    dialog.showErrorBox('无法打开文件', String(error))
+  }
 }
 
 /**
@@ -65,34 +84,34 @@ export function attachCloseGuard(win: BrowserWindow): void {
 
 export function registerIpcHandlers(): void {
   // ---------- 打开文件 ----------
-  ipcMain.handle('dialog:open-file', async (event) => {
-    const win = winOf(event.sender)
-    if (!win) return null
+  ipcMain.handle(
+    'dialog:open-file',
+    async (event): Promise<FileContentPayload | null> => {
+      const win = winOf(event.sender)
+      if (!win) return null
 
-    const result = await dialog.showOpenDialog(win, {
-      title: '打开 Markdown 文件',
-      properties: ['openFile'],
-      filters: MD_FILTERS
-    })
-    if (result.canceled || result.filePaths.length === 0) return null
+      const result = await dialog.showOpenDialog(win, {
+        title: '打开 Markdown 文件',
+        properties: ['openFile'],
+        filters: MD_FILTERS
+      })
+      if (result.canceled || result.filePaths.length === 0) return null
 
-    const filePath = result.filePaths[0]
-    try {
-      const content = await fsp.readFile(filePath, 'utf-8')
-      return { path: filePath, content }
-    } catch (error) {
-      dialog.showErrorBox('无法读取文件', String(error))
-      return null
+      const filePath = result.filePaths[0]
+      try {
+        const content = await fsp.readFile(filePath, 'utf-8')
+        return { path: filePath, content }
+      } catch (error) {
+        dialog.showErrorBox('无法读取文件', String(error))
+        return null
+      }
     }
-  })
+  )
 
   // ---------- 另存为 ----------
   ipcMain.handle(
     'dialog:save-as',
-    async (
-      event,
-      payload: { content: string; suggestedName?: string }
-    ) => {
+    async (event, payload: SaveAsPayload): Promise<SaveAsResult | null> => {
       const win = winOf(event.sender)
       if (!win) return null
 
@@ -116,7 +135,7 @@ export function registerIpcHandlers(): void {
   // ---------- 直接写文件（已知路径的保存） ----------
   ipcMain.handle(
     'file:write',
-    async (_event, payload: { path: string; content: string }) => {
+    async (_event, payload: FileContentPayload) => {
       try {
         await fsp.writeFile(payload.path, payload.content, 'utf-8')
         return true
@@ -173,15 +192,20 @@ export function registerIpcHandlers(): void {
   })
 
   // ---------- 读取文件内容（拖放到当前窗口用） ----------
-  ipcMain.handle('file:read-content', async (_event, filePath: string) => {
-    try {
-      const content = await fsp.readFile(filePath, 'utf-8')
-      return { path: filePath, content }
-    } catch (error) {
-      dialog.showErrorBox('无法读取文件', String(error))
-      throw error
+  ipcMain.handle(
+    'file:read-content',
+    async (_event, filePath: string): Promise<FileContentPayload | null> => {
+      if (typeof filePath !== 'string') return null
+      try {
+        const content = await fsp.readFile(filePath, 'utf-8')
+        return { path: filePath, content }
+      } catch (error) {
+        // 与 dialog:open-file 保持一致：弹框提示并返回 null，不向渲染端抛出
+        dialog.showErrorBox('无法读取文件', String(error))
+        return null
+      }
     }
-  })
+  )
 }
 
 /**
@@ -199,15 +223,10 @@ export function attachNativeThemeSync(refreshMenu: () => void): void {
       if (process.platform === 'win32') {
         // 即时重设标题栏按钮区配色（程序化设置，无 DWM 渐变），
         // 使标题栏与内容同刻切换
-        const overlay = (win as unknown as {
-          setTitleBarOverlay?: (o: { color: string; symbolColor: string }) => void
-        }).setTitleBarOverlay
-        if (typeof overlay === 'function') {
-          overlay.call(win, {
-            color: palette.color,
-            symbolColor: palette.symbolColor
-          })
-        }
+        win.setTitleBarOverlay({
+          color: palette.color,
+          symbolColor: palette.symbolColor
+        })
         // 强制重设标题触发 DWM 非客户区按新主题重绘（零视觉副作用）
         win.setTitle(win.getTitle())
       }

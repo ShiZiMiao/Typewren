@@ -55,6 +55,13 @@ const BUTTONS: (ToolButtonDef | 'sep')[] = [
   }
 ]
 
+/** 工具条与表格之间的垂直间距 */
+const TOOLBAR_GAP_PX = 8
+/** 工具条与视口边缘的最小留白 */
+const VIEWPORT_MARGIN_PX = 6
+/** 工具条与视口右侧的最小间距 */
+const TOOLBAR_SIDE_GAP_PX = 12
+
 let toolbarEl: HTMLElement | null = null
 let activeView: EditorView | null = null
 
@@ -120,12 +127,12 @@ function positionToolbar(view: EditorView, tablePos: number): void {
   const rect = tableDom.getBoundingClientRect()
   const barRect = toolbarEl.getBoundingClientRect()
 
-  let top = rect.top - barRect.height - 8
-  if (top < 6) top = rect.bottom + 8
+  let top = rect.top - barRect.height - TOOLBAR_GAP_PX
+  if (top < VIEWPORT_MARGIN_PX) top = rect.bottom + TOOLBAR_GAP_PX
 
   let left = rect.left
-  const maxLeft = window.innerWidth - barRect.width - 12
-  if (left > maxLeft) left = Math.max(8, maxLeft)
+  const maxLeft = window.innerWidth - barRect.width - TOOLBAR_SIDE_GAP_PX
+  if (left > maxLeft) left = Math.max(VIEWPORT_MARGIN_PX, maxLeft)
 
   toolbarEl.style.top = `${Math.round(top)}px`
   toolbarEl.style.left = `${Math.round(left)}px`

@@ -1,25 +1,21 @@
+import type {
+  CommandName,
+  FileContentPayload,
+  OpenFileResult,
+  SaveAsPayload,
+  SaveAsResult
+} from '../../shared/ipc'
+
 export {}
 
-export interface OpenFileResult {
-  path: string
-  content: string
-}
-
-export interface SaveAsResult {
-  path: string
-}
-
 export interface TypewrenApi {
-  readonly platform: string
+  readonly platform: NodeJS.Platform
 
   openFileDialog(): Promise<OpenFileResult | null>
 
-  saveFileDialog(payload: {
-    content: string
-    suggestedName?: string
-  }): Promise<SaveAsResult | null>
+  saveFileDialog(payload: SaveAsPayload): Promise<SaveAsResult | null>
 
-  writeFile(payload: { path: string; content: string }): Promise<boolean>
+  writeFile(payload: FileContentPayload): Promise<boolean>
 
   confirmDiscardChanges(): Promise<'save' | 'discard' | 'cancel'>
 
@@ -36,7 +32,7 @@ export interface TypewrenApi {
   /** 在指定窗口坐标弹出某顶级菜单的子菜单（自绘菜单栏用） */
   popupMenu(label: string, x: number, y: number): void
 
-  onCommand(callback: (name: string, payload?: unknown) => void): () => void
+  onCommand(callback: (name: CommandName, payload?: unknown) => void): () => void
 
   /** 在新窗口中打开指定文件 */
   openFileInNewWindow(filePath: string): void
@@ -44,8 +40,8 @@ export interface TypewrenApi {
   /** 获取文件的绝对路径（用于拖拽文件） */
   getPathForFile(file: File): string
 
-  /** 读取指定路径的文件内容 */
-  readFileContent(filePath: string): Promise<{ path: string; content: string }>
+  /** 读取指定路径的文件内容；失败返回 null */
+  readFileContent(filePath: string): Promise<OpenFileResult | null>
 }
 
 declare global {

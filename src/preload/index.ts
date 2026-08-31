@@ -1,13 +1,12 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
-export interface OpenFileResult {
-  path: string
-  content: string
-}
-
-export interface SaveAsResult {
-  path: string
-}
+import type {
+  CommandName,
+  FileContentPayload,
+  OpenFileResult,
+  SaveAsPayload,
+  SaveAsResult
+} from '../shared/ipc'
 
 export interface TypewrenApi {
   readonly platform: NodeJS.Platform
@@ -16,13 +15,10 @@ export interface TypewrenApi {
   openFileDialog(): Promise<OpenFileResult | null>
 
   /** 弹出原生另存为对话框并写入；取消或失败返回 null */
-  saveFileDialog(payload: {
-    content: string
-    suggestedName?: string
-  }): Promise<SaveAsResult | null>
+  saveFileDialog(payload: SaveAsPayload): Promise<SaveAsResult | null>
 
   /** 直接写入已知路径；失败弹错误框并返回 false */
-  writeFile(payload: { path: string; content: string }): Promise<boolean>
+  writeFile(payload: FileContentPayload): Promise<boolean>
 
   /** 未保存时新建/打开前的确认，返回用户选择 */
   confirmDiscardChanges(): Promise<'save' | 'discard' | 'cancel'>
@@ -52,9 +48,7 @@ export interface TypewrenApi {
    * 订阅主进程派发的命令（菜单/快捷键触发）。
    * 返回取消订阅函数。
    */
-  onCommand(
-    callback: (name: string, payload?: unknown) => void
-  ): () => void
+  onCommand(callback: (name: CommandName, payload?: unknown) => void): () => void
 
   /** 在新窗口中打开指定文件 */
   openFileInNewWindow(filePath: string): void
@@ -62,8 +56,8 @@ export interface TypewrenApi {
   /** 获取文件的绝对路径（用于拖拽文件） */
   getPathForFile(file: File): string
 
-  /** 读取指定路径的文件内容 */
-  readFileContent(filePath: string): Promise<OpenFileResult>
+  /** 读取指定路径的文件内容；失败弹错误框并返回 null */
+  readFileContent(filePath: string): Promise<OpenFileResult | null>
 }
 
 const api: TypewrenApi = {
@@ -100,7 +94,7 @@ const api: TypewrenApi = {
       _event: Electron.IpcRendererEvent,
       name: string,
       payload?: unknown
-    ): void => callback(name, payload)
+    ): void => callback(name as CommandName, payload)
     ipcRenderer.on('cmd', handler)
     return () => ipcRenderer.off('cmd', handler)
   },

@@ -7,6 +7,8 @@
  *   footer#status-bar         状态栏
  * ============================================================ */
 
+import { MENU_TOP_LABELS } from '../../../shared/menu'
+
 export interface AppLayout {
   root: HTMLElement
   titlebar: HTMLElement
@@ -50,11 +52,10 @@ export function buildLayout(parent: HTMLElement): AppLayout {
   titlebar.append(titlebarIcon, titlebarTitle)
 
   /* ---------- 自绘菜单栏（点击弹出原生子菜单） ---------- */
-  const MENU_LABELS = ['文件', '编辑', '格式', '段落', '视图', '帮助']
   const menubar = document.createElement('div')
   menubar.id = 'menubar'
   menubar.setAttribute('role', 'menubar')
-  for (const label of MENU_LABELS) {
+  for (const label of MENU_TOP_LABELS) {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className = 'menubar-item'

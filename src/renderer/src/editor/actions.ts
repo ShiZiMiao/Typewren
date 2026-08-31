@@ -3,6 +3,8 @@ import {
   serializerCtx,
   type Editor
 } from '@milkdown/kit/core'
+import type { Ctx } from '@milkdown/kit/ctx'
+import type { Node as ProseNode } from '@milkdown/kit/prose/model'
 import { setBlockType, toggleMark, wrapIn } from '@milkdown/kit/prose/commands'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { insert, replaceAll } from '@milkdown/kit/utils'
@@ -27,8 +29,11 @@ export function setMarkdown(editor: Editor, markdown: string): void {
 }
 
 function withView(editor: Editor, fn: (view: EditorView) => void): void {
-  editor.action((ctx) => fn(ctx.get(editorViewCtx)))
-  editor.action((ctx) => ctx.get(editorViewCtx).focus())
+  editor.action((ctx) => {
+    const view = ctx.get(editorViewCtx)
+    fn(view)
+    view.focus()
+  })
 }
 
 /* ---------------- 行内格式 ---------------- */
@@ -118,21 +123,35 @@ export function insertTaskItem(editor: Editor): void {
   insertMarkdown(editor, '\n- [ ] 任务\n')
 }
 
-/** 插入空块级公式并立即进入源码编辑状态 */
-export function insertMathBlock(editor: Editor): void {
+/**
+ * 在光标处插入一个可选中的原子节点（公式用），并立即进入其源码编辑状态。
+ * replaceSelectionWith 对可选择的原子节点会自动产生 NodeSelection；
+ * 兜底分支对 selection.from - node.nodeSize 做下限钳制，防止插入位置在文档开头时算负。
+ */
+function insertMathNode(
+  editor: Editor,
+  createNode: (ctx: Ctx) => ProseNode | null
+): void {
   editor.action((ctx) => {
     const view = ctx.get(editorViewCtx)
-    const node = mathBlockSchema.type(ctx).create({ value: '' })
+    const node = createNode(ctx)
     if (!node) return
 
     const tr = view.state.tr.replaceSelectionWith(node)
-    // replaceSelectionWith 对可选择的原子节点会自动产生 NodeSelection
     if (!(tr.selection instanceof NodeSelection)) {
-      tr.setSelection(NodeSelection.create(tr.doc, tr.selection.from - node.nodeSize))
+      const pos = Math.max(0, tr.selection.from - node.nodeSize)
+      tr.setSelection(NodeSelection.create(tr.doc, pos))
     }
     view.dispatch(tr)
   })
   editor.action((ctx) => ctx.get(editorViewCtx).focus())
+}
+
+/** 插入空块级公式并立即进入源码编辑状态 */
+export function insertMathBlock(editor: Editor): void {
+  insertMathNode(editor, (ctx) =>
+    mathBlockSchema.type(ctx).create({ value: '' })
+  )
 }
 
 export async function insertOrUpdateLink(editor: Editor): Promise<void> {
@@ -168,16 +187,7 @@ export async function insertImage(editor: Editor): Promise<void> {
 
 /** 在光标处插入一个行内公式节点 */
 export function insertMathInline(editor: Editor): void {
-  editor.action((ctx) => {
-    const view = ctx.get(editorViewCtx)
-    const node = mathInlineSchema.type(ctx).create({ value: '' })
-    if (!node) return
-
-    const tr = view.state.tr.replaceSelectionWith(node)
-    if (!(tr.selection instanceof NodeSelection)) {
-      tr.setSelection(NodeSelection.create(tr.doc, tr.selection.from - node.nodeSize))
-    }
-    view.dispatch(tr)
-  })
-  editor.action((ctx) => ctx.get(editorViewCtx).focus())
+  insertMathNode(editor, (ctx) =>
+    mathInlineSchema.type(ctx).create({ value: '' })
+  )
 }
