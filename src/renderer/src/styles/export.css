@@ -1,0 +1,71 @@
+/* ============================================================
+ * 导出文档（PDF / HTML）专用样式
+ * 与 variables.css + editor.css 一起内联进导出页面，编辑器排版 1:1；
+ * 这里只做"页面级"差异修正：正文容器宽度、滚动、打印分页与表格适配。
+ * ============================================================ */
+
+/* 导出页面允许滚动、高度自适应（variables.css 的 overflow:hidden 仅限编辑器） */
+html,
+body {
+  height: auto;
+  overflow: visible;
+}
+
+/* 正文容器：居中 + 两侧留白（屏幕阅读与浏览器打开时用） */
+.export-root {
+  max-width: var(--editor-max-width);
+  margin: 0 auto;
+  padding: 32px 28px 96px;
+}
+
+/* 表格横向滚动：导出页同样由 .table-scroll-wrapper 承载（与编辑器一致） */
+.export-root .table-scroll-wrapper {
+  overflow-x: auto;
+}
+
+/* ---------- 打印（PDF 导出） ---------- */
+@media print {
+  @page {
+    size: A4;
+    margin: 16mm 14mm;
+  }
+
+  /* 去掉屏幕留白，正文铺满页宽 */
+  .export-root {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* 表格在打印时取消横向滚动，允许单元格换行以适配页宽 */
+  .export-root .table-scroll-wrapper {
+    overflow: visible;
+  }
+
+  .ProseMirror table {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .ProseMirror th,
+  .ProseMirror td {
+    white-space: normal;
+  }
+
+  /* 代码块 / 表格 / 引用块避免跨页截断，标题后紧跟内容 */
+  .ProseMirror pre,
+  .ProseMirror table,
+  .ProseMirror blockquote,
+  .ProseMirror .typewren-math-block {
+    break-inside: avoid;
+  }
+
+  .ProseMirror h1,
+  .ProseMirror h2,
+  .ProseMirror h3,
+  .ProseMirror h4,
+  .ProseMirror h5,
+  .ProseMirror h6 {
+    break-after: avoid;
+  }
+}

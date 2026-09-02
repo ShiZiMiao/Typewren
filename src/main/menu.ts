@@ -42,6 +42,13 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         { type: 'separator' },
         item('保存', 'save', 'CmdOrCtrl+S'),
         item('另存为…', 'save-as', 'CmdOrCtrl+Shift+S'),
+        {
+          label: '导出',
+          submenu: [
+            item('导出为 PDF…', 'export:pdf'),
+            item('导出为 HTML…', 'export:html')
+          ]
+        },
         { type: 'separator' },
         { label: '退出', role: 'quit' }
       ]

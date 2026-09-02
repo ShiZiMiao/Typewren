@@ -98,7 +98,8 @@ export function makeCodeBlock(editor: Editor): void {
 
 /* ---------------- 插入类 ---------------- */
 
-function insertMarkdown(editor: Editor, markdown: string): void {
+/** 在光标处插入原始 Markdown 片段（图片粘贴/拖拽等场景复用） */
+export function insertMarkdown(editor: Editor, markdown: string): void {
   editor.action(insert(markdown))
   editor.action((ctx) => ctx.get(editorViewCtx).focus())
 }

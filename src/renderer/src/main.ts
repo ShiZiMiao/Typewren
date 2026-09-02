@@ -25,6 +25,11 @@ import { initThemeToggle } from '@/ui/theme'
 import { createSearchBar } from '@/ui/searchBar'
 import { BackgroundSettingsController } from '@/ui/backgroundSettings'
 import { FileService } from '@/services/fileService'
+import {
+  ImageService,
+  handleImageDrop,
+  handleImagePaste
+} from '@/services/imagePasteService'
 import { registerCommandRouter } from '@/commandRouter'
 import { isMarkdownPath } from '../../shared/ipc'
 
@@ -136,6 +141,7 @@ async function bootstrap(): Promise<void> {
   let fileService!: FileService
   let outline!: ReturnType<typeof createOutlinePanel>
   let sourceMode!: SourceModeController
+  let imageService: ImageService | null = null
 
   const refreshStatusBar = (): void => {
     updateStatusBar(instance.editor, layout, sourceMode.getSourceState())
@@ -165,7 +171,9 @@ async function bootstrap(): Promise<void> {
     onViewChanged: () => {
       refreshStatusBar()
       refreshOutline()
-    }
+    },
+    onPaste: (event) =>
+      imageService ? handleImagePaste(imageService, event) : false
   })
 
   /* ---------- 初始化各模块 ---------- */
@@ -182,6 +190,7 @@ async function bootstrap(): Promise<void> {
     refreshStatusBar
   )
   outline = createOutlinePanel(instance.editor, layout.outlineTree)
+  imageService = new ImageService(window.typewren, instance.editor, fileService)
 
   /* ---------- 搜索栏 ---------- */
   const searchBar = createSearchBar(
@@ -234,25 +243,32 @@ async function bootstrap(): Promise<void> {
     e.stopPropagation()
   }
 
-  const handleDrop = (e: DragEvent): void => {
+const handleDrop = (e: DragEvent): void => {
     e.preventDefault()
     e.stopPropagation()
     const files = Array.from(e.dataTransfer?.files ?? [])
-    for (const file of files) {
-      if (!isMarkdownPath(file.name)) continue
-      const filePath = window.typewren.getPathForFile(file)
-      // 当前窗口是空文档则在当前打开，否则新窗口
-      const isEmpty = !fileService.getFilePath() && !fileService.isDirty
-      if (isEmpty) {
-        void window.typewren.readFileContent(filePath).then((result) => {
-          if (result) {
-            void fileService.loadContentFromPath(result.path, result.content)
-          }
-        })
-      } else {
-        window.typewren.openFileInNewWindow(filePath)
+
+    // 原有逻辑：拖入 .md → 当前窗口空文档就地打开，否则新窗口打开
+    const mdFiles = files.filter((file) => isMarkdownPath(file.name))
+    if (mdFiles.length > 0) {
+      for (const file of mdFiles) {
+        const filePath = window.typewren.getPathForFile(file)
+        const isEmpty = !fileService.getFilePath() && !fileService.isDirty
+        if (isEmpty) {
+          void window.typewren.readFileContent(filePath).then((result) => {
+            if (result) {
+              void fileService.loadContentFromPath(result.path, result.content)
+            }
+          })
+        } else {
+          window.typewren.openFileInNewWindow(filePath)
+        }
       }
+      return
     }
+
+    // 图片文件 / 网络图片 URL → 本地化后插入编辑器
+    if (imageService) handleImageDrop(imageService, e)
   }
 
   // 使用捕获阶段，确保在 ProseMirror 处理之前拦截

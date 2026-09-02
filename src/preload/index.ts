@@ -2,7 +2,13 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import type {
   CommandName,
+  ExportDocumentPayload,
+  ExportDocumentResult,
   FileContentPayload,
+  ImageDownloadPayload,
+  ImageSaveFromDataPayload,
+  ImageSaveFromPathPayload,
+  ImageSaveResult,
   OpenFileResult,
   SaveAsPayload,
   SaveAsResult
@@ -19,6 +25,18 @@ export interface TypewrenApi {
 
   /** 直接写入已知路径；失败弹错误框并返回 false */
   writeFile(payload: FileContentPayload): Promise<boolean>
+
+  /** 导出文档（HTML 写盘 / PDF 打印）；取消或失败返回相应标记 */
+  exportDocument(payload: ExportDocumentPayload): Promise<ExportDocumentResult>
+
+  /** 把本地图片复制到资产目录（粘贴/拖拽的文件型图片） */
+  saveImageFromPath(payload: ImageSaveFromPathPayload): Promise<ImageSaveResult>
+
+  /** 把剪贴板位图（base64）保存到资产目录 */
+  saveImageFromData(payload: ImageSaveFromDataPayload): Promise<ImageSaveResult>
+
+  /** 下载网络图片并保存到资产目录（本地化） */
+  downloadImage(payload: ImageDownloadPayload): Promise<ImageSaveResult>
 
   /** 未保存时新建/打开前的确认，返回用户选择 */
   confirmDiscardChanges(): Promise<'save' | 'discard' | 'cancel'>
@@ -68,6 +86,15 @@ const api: TypewrenApi = {
   saveFileDialog: (payload) => ipcRenderer.invoke('dialog:save-as', payload),
 
   writeFile: (payload) => ipcRenderer.invoke('file:write', payload),
+
+  exportDocument: (payload) =>
+    ipcRenderer.invoke('export:document', payload),
+
+  saveImageFromPath: (payload) => ipcRenderer.invoke('image:save-from-path', payload),
+
+  saveImageFromData: (payload) => ipcRenderer.invoke('image:save-from-data', payload),
+
+  downloadImage: (payload) => ipcRenderer.invoke('image:download', payload),
 
   confirmDiscardChanges: () => ipcRenderer.invoke('dialog:discard-changes'),
 

@@ -6,6 +6,7 @@ import type { OutlineController } from '@/ui/outlinePanel'
 import type { SearchBar } from '@/ui/searchBar'
 import type { SourceModeController } from '@/ui/sourceMode'
 import type { FileService } from '@/services/fileService'
+import { exportDocument } from '@/editor/exportDocument'
 import {
   insertHr,
   insertImage,
@@ -58,6 +59,12 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
       case 'save-and-close':
         void fileService.saveThenClose()
         break
+      case 'export:pdf':
+        void exportDocument(editor, fileService, 'pdf')
+        break
+      case 'export:html':
+        void exportDocument(editor, fileService, 'html')
+        break
       case 'open-file-path':
         if (isFileContentPayload(payload)) {
           void fileService
@@ -74,7 +81,8 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
         toggleTextMark(editor, 'emphasis')
         break
       case 'format:strike':
-        toggleTextMark(editor, 'strikethrough')
+        // 注意：Milkdown gfm 删除线 mark 的 schema id 是 strike_through
+        toggleTextMark(editor, 'strike_through')
         break
       case 'format:inline-code':
         toggleTextMark(editor, 'inlineCode')

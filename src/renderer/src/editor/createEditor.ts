@@ -6,14 +6,15 @@ import {
   rootCtx
 } from '@milkdown/kit/core'
 import { commonmark } from '@milkdown/kit/preset/commonmark'
-import { gfm } from '@milkdown/kit/preset/gfm'
+import { gfm, tableSchema } from '@milkdown/kit/preset/gfm'
 import { Plugin } from '@milkdown/kit/prose/state'
-import type { EditorView } from '@milkdown/kit/prose/view'
+import type { Node as ProseNode } from '@milkdown/kit/prose/model'
+import type { EditorView, NodeView } from '@milkdown/kit/prose/view'
 import { history } from '@milkdown/kit/plugin/history'
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
 import { trailing } from '@milkdown/kit/plugin/trailing'
 import { cursor } from '@milkdown/kit/plugin/cursor'
-import { $prose } from '@milkdown/kit/utils'
+import { $prose, $view } from '@milkdown/kit/utils'
 
 import { highlight, configureCodeHighlight } from './highlight'
 import {
@@ -48,6 +49,11 @@ export interface CreateEditorOptions {
   onMarkdownUpdated: (markdown: string) => void
   /** 视图变化 —— 用于状态栏与大纲联动 */
   onViewChanged: (change: ViewChangeKind) => void
+  /**
+   * 粘贴拦截（可选）：返回 true 表示已处理（如图片落盘），
+   * 不再交给 ProseMirror 默认行为。
+   */
+  onPaste?: (event: ClipboardEvent) => boolean
 }
 
 export interface EditorInstance {
@@ -106,6 +112,28 @@ export async function createEditor(
     })
   })
 
+  /**
+   * 表格横向滚动包裹层（nodeView 方案）：
+   * 必须经 $view 宏注册 —— 若直接写进 editorViewOptionsCtx.nodeViews，
+   * 会在 view 构造时被展开的 options 整体覆盖，导致其它 $view 注册的
+   * nodeViews（如数学公式）全部失效（行内/块级公式在编辑器中不可见）。
+   */
+  const tableScrollView = $view(tableSchema.node, () => {
+    return (_node: ProseNode, _view: EditorView, _getPos: () => number | undefined): NodeView => {
+      const wrapper = document.createElement('div')
+      wrapper.className = 'table-scroll-wrapper'
+      const table = document.createElement('table')
+      const tbody = document.createElement('tbody')
+      table.appendChild(tbody)
+      wrapper.appendChild(table)
+      return {
+        dom: wrapper,
+        contentDOM: tbody,
+        update: (n: ProseNode) => n.type.name === 'table'
+      }
+    }
+  })
+
   const editor = await Editor.make()
     .config((ctx) => {
       ctx.set(rootCtx, options.root)
@@ -118,20 +146,9 @@ export async function createEditor(
           spellcheck: 'false',
           class: 'typewren-prosemirror'
         },
-        nodeViews: {
-          table: (_node, _view, _getPos) => {
-            const wrapper = document.createElement('div')
-            wrapper.className = 'table-scroll-wrapper'
-            const table = document.createElement('table')
-            const tbody = document.createElement('tbody')
-            table.appendChild(tbody)
-            wrapper.appendChild(table)
-            return {
-              dom: wrapper,
-              contentDOM: tbody,
-              update: (n) => n.type.name === 'table'
-            }
-          }
+        handlePaste: (_view, event) => {
+          if (options.onPaste) return options.onPaste(event)
+          return false
         }
       }))
 
@@ -159,6 +176,7 @@ export async function createEditor(
     .use(inlineMathInputRule)
     .use(tableTools)
     .use(taskListToggle)
+    .use(tableScrollView)
     .use(viewEvents)
     .use(emptyDocPlaceholder)
     .create()

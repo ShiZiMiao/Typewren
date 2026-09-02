@@ -3,6 +3,8 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { createMainWindow } from './window'
 import { attachNativeThemeSync, openPathInWindow, registerIpcHandlers } from './io'
 import { installApplicationMenu, refreshApplicationMenu, registerMenuPopup } from './menu'
+import { registerExportHandlers } from './export'
+import { registerImageHandlers } from './images'
 import { checkForUpdates } from './updater'
 import { isMarkdownPath } from '../shared/ipc'
 
@@ -38,6 +40,8 @@ if (!gotSingleInstanceLock) {
 
   app.whenReady().then(() => {
     registerIpcHandlers()
+    registerExportHandlers()
+    registerImageHandlers()
     installApplicationMenu()
     registerMenuPopup()
     attachNativeThemeSync(refreshApplicationMenu)

@@ -1,6 +1,14 @@
+/// <reference types="vite/client" />
+
 import type {
   CommandName,
+  ExportDocumentPayload,
+  ExportDocumentResult,
   FileContentPayload,
+  ImageDownloadPayload,
+  ImageSaveFromDataPayload,
+  ImageSaveFromPathPayload,
+  ImageSaveResult,
   OpenFileResult,
   SaveAsPayload,
   SaveAsResult
@@ -16,6 +24,14 @@ export interface TypewrenApi {
   saveFileDialog(payload: SaveAsPayload): Promise<SaveAsResult | null>
 
   writeFile(payload: FileContentPayload): Promise<boolean>
+
+  exportDocument(payload: ExportDocumentPayload): Promise<ExportDocumentResult>
+
+  saveImageFromPath(payload: ImageSaveFromPathPayload): Promise<ImageSaveResult>
+
+  saveImageFromData(payload: ImageSaveFromDataPayload): Promise<ImageSaveResult>
+
+  downloadImage(payload: ImageDownloadPayload): Promise<ImageSaveResult>
 
   confirmDiscardChanges(): Promise<'save' | 'discard' | 'cancel'>
 

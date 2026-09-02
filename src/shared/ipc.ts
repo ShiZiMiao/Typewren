@@ -42,6 +42,76 @@ export interface SaveAsPayload {
   suggestedName?: string
 }
 
+/** 导出文档载荷（渲染层已拼好完整 HTML 页面，主进程负责写盘 / 打印） */
+export interface ExportDocumentPayload {
+  kind: 'pdf' | 'html'
+  /** 完整 HTML 文档字符串（含内联样式，KaTeX 字体待主进程内联） */
+  html: string
+  /** 导出对话框的默认文件名（含扩展名） */
+  suggestedName: string
+}
+
+export interface ExportDocumentResult {
+  ok: boolean
+  /** 用户在另存为对话框中取消 */
+  canceled?: boolean
+  error?: string
+}
+
+/** 可保存的图片扩展名（小写、带点） */
+export const IMAGE_EXTENSIONS = [
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.svg',
+  '.bmp',
+  '.ico',
+  '.tif',
+  '.tiff'
+] as const
+
+/** 文件名是否为受支持的图片 */
+export function isImagePath(fileName: string): boolean {
+  const dot = fileName.lastIndexOf('.')
+  if (dot < 0) return false
+  const ext = fileName.slice(dot).toLowerCase()
+  return (IMAGE_EXTENSIONS as readonly string[]).includes(ext)
+}
+
+/** 文件是否为图片（File.type 命中或扩展名命中） */
+export function isImageFile(file: { type?: string; name: string }): boolean {
+  return (file.type ?? '').startsWith('image/') || isImagePath(file.name)
+}
+
+/** 从本地路径复制图片（paste/drop 从文件系统来） */
+export interface ImageSaveFromPathPayload {
+  srcPath: string
+  /** 目标目录（文档同目录 assets）；null 表示文档尚无路径，用用户数据区默认目录 */
+  destDir: string | null
+}
+
+/** 以 base64 保存图片（剪贴板截图 / 网页图片等无路径来源） */
+export interface ImageSaveFromDataPayload {
+  base64: string
+  mime: string
+  destDir: string | null
+}
+
+/** 下载网络图片并本地化保存 */
+export interface ImageDownloadPayload {
+  url: string
+  destDir: string | null
+}
+
+export interface ImageSaveResult {
+  ok: boolean
+  /** 保存后的绝对路径（渲染层据此生成 Markdown 引用） */
+  savedPath?: string
+  error?: string
+}
+
 /** open-file-path 等文件载荷的类型守卫（替代裸断言） */
 export function isFileContentPayload(
   value: unknown
@@ -58,6 +128,8 @@ export type CommandName =
   | 'save'
   | 'save-as'
   | 'save-and-close'
+  | 'export:pdf'
+  | 'export:html'
   | 'open-file-path'
   | 'format:bold'
   | 'format:italic'

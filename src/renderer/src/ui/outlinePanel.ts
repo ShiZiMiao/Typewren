@@ -95,24 +95,37 @@ export function createOutlinePanel(
       const target = entries[index]
       if (!target) return
 
+let scrollTarget = 0
+      let container: HTMLElement | null = null
+      let pmDom: HTMLElement | null = null
+
       editor.action((ctx) => {
         const view = ctx.get(editorViewCtx)
         const $pos = view.state.doc.resolve(target.pos + 1)
         const selection = TextSelection.near($pos, 1)
-        view.dispatch(view.state.tr.setSelection(selection).scrollIntoView())
+        view.dispatch(view.state.tr.setSelection(selection))
 
-        view.focus()
-        requestAnimationFrame(() => {
-          const domResult = view.domAtPos(target.pos)
-          const element =
-            domResult.node instanceof Element
-              ? domResult.node
-              : domResult.node.parentElement
-          element?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        })
+        container = document.querySelector('#editor-container') as HTMLElement
+        pmDom = view.dom
 
-        controller.setActive(index)
+        // 直接按 heading 层级从 DOM 里找对应标题（比 domAtPos 更可靠）
+        const allHeadings = view.dom.querySelectorAll('h1, h2, h3, h4, h5, h6')
+        const headingEl = allHeadings[index] as HTMLElement | undefined
+        if (headingEl && container) {
+          const headingRect = headingEl.getBoundingClientRect()
+          const containerRect = container.getBoundingClientRect()
+          scrollTarget = headingRect.top - containerRect.top + container.scrollTop
+        }
       })
+
+      setTimeout(() => {
+        if (scrollTarget > 0 && container) {
+          container.scrollTo({ top: scrollTarget, behavior: 'smooth' })
+        }
+        // 把焦点还给编辑器，preventScroll 阻止浏览器原生 focus-scroll 撤销滚动
+        pmDom?.focus({ preventScroll: true })
+        controller.setActive(index)
+      }, 0)
     }
   }
 
