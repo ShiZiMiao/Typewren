@@ -7,10 +7,7 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:; connect-src 'self' ws://localhost:* http://localhost:*"
     />
-    <link rel="stylesheet" href="./src/styles/variables.css" />
-    <link rel="stylesheet" href="./src/styles/layout.css" />
-    <link rel="stylesheet" href="./src/styles/editor.css" />
-    <link rel="stylesheet" href="./src/styles/widgets.css" />
+    <!-- CSS 由 main.ts 统一导入，确保 dev/build 级联顺序一致 -->
   </head>
   <body>
     <div id="app-root"></div>
