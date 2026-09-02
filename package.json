@@ -1,7 +1,7 @@
 {
   "name": "typewren",
   "productName": "Typewren",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Typewren —— 单栏所见即所得 Markdown 桌面编辑器（基于 Electron + Milkdown）",
   "main": "./out/main/index.js",
   "author": "Typewren Team",
