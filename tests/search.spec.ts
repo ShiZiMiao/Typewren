@@ -207,3 +207,48 @@ test.describe('布局', () => {
     await expect(window.locator('#status-bar')).toBeVisible()
   })
 })
+
+// ========== 搜索扩展（补充用例） ==========
+
+test.describe('搜索扩展', () => {
+  test.beforeEach(async () => {
+    await ensureSearchClosed()
+  })
+
+  test('无匹配显示 0/0', async () => {
+    await setEditorContent('ababab')
+    await window.keyboard.press('Control+f')
+    await window.locator('#search-input').fill('zzz不存在')
+    await window.waitForTimeout(500)
+    await expect(window.locator('#search-match-count')).toHaveText('0/0')
+  })
+
+  test('跨段内容匹配', async () => {
+    await setEditorContent('第一段内容 hello\n\n第二段 hello world')
+    await window.keyboard.press('Control+f')
+    await window.locator('#search-input').fill('hello')
+    await window.waitForTimeout(500)
+    await expect(window.locator('#search-match-count')).toHaveText('1/2')
+  })
+
+  test('替换后文档置脏', async () => {
+    await setEditorContent('hello world')
+    await window.keyboard.press('Control+h')
+    await window.locator('#search-input').fill('hello')
+    await window.locator('#replace-input').fill('hi')
+    await window.waitForTimeout(500)
+    await window.locator('#btn-replace').click()
+    await window.waitForTimeout(300)
+    await expect(window.locator('#titlebar-title')).toContainText('●')
+  })
+
+  test('Esc 关闭搜索栏且不破坏文档', async () => {
+    await setEditorContent('hello world')
+    await window.keyboard.press('Control+f')
+    await window.locator('#search-input').fill('hello')
+    await window.waitForTimeout(300)
+    await window.locator('#search-input').press('Escape')
+    await expect(window.locator('#search-bar')).toBeHidden()
+    await expect(window.locator('.ProseMirror')).toContainText('hello world')
+  })
+})

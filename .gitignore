@@ -15,6 +15,11 @@ logs/
 *.log
 npm-debug.log*
 
+# Playwright / E2E
+test-results/
+tests-tmp/
+playwright-report/
+
 # OS
 .DS_Store
 Thumbs.db
