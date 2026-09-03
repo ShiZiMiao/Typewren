@@ -1,15 +1,15 @@
-import { join } from 'node:path'
+import { join } from 'node:path';
 
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, shell } from 'electron';
 
-import { attachCloseGuard } from './io'
-import { TITLEBAR_PALETTE } from '../shared/titlebar'
+import { attachCloseGuard } from './io';
+import { TITLEBAR_PALETTE } from '../shared/titlebar';
 
 /** 默认窗口尺寸与最小尺寸 */
-const WINDOW_WIDTH = 1200
-const WINDOW_HEIGHT = 800
-const WINDOW_MIN_WIDTH = 720
-const WINDOW_MIN_HEIGHT = 480
+const WINDOW_WIDTH = 1200;
+const WINDOW_HEIGHT = 800;
+const WINDOW_MIN_WIDTH = 720;
+const WINDOW_MIN_HEIGHT = 480;
 
 export function createMainWindow(): BrowserWindow {
   const winOptions: Electron.BrowserWindowConstructorOptions = {
@@ -35,44 +35,44 @@ export function createMainWindow(): BrowserWindow {
       nodeIntegration: false,
       spellcheck: false
     }
-  }
+  };
 
   // 仅 Windows 启用 titleBarOverlay：以我们指定的底色即时绘制标题栏按钮区，
   // 不再依赖 nativeTheme 驱动原生标题栏（那是 70ms 渐变的来源）
   if (process.platform === 'win32') {
-    winOptions.titleBarStyle = 'hidden'
+    winOptions.titleBarStyle = 'hidden';
     winOptions.titleBarOverlay = {
       color: TITLEBAR_PALETTE.light.color,
       symbolColor: TITLEBAR_PALETTE.light.symbolColor
-    }
+    };
   }
 
-  const win = new BrowserWindow(winOptions)
+  const win = new BrowserWindow(winOptions);
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => win.show());
 
   // 外部链接一律交给系统默认浏览器，绝不在应用内打开；
   // 仅放行 http/https，拒绝 file:/javascript: 等可被滥用的协议
   win.webContents.setWindowOpenHandler(({ url }) => {
     try {
-      const protocol = new URL(url).protocol
+      const protocol = new URL(url).protocol;
       if (protocol === 'http:' || protocol === 'https:') {
-        void shell.openExternal(url)
+        void shell.openExternal(url);
       }
     } catch {
       // URL 解析失败（非法地址）一律忽略
     }
-    return { action: 'deny' }
-  })
+    return { action: 'deny' };
+  });
 
-  attachCloseGuard(win)
+  attachCloseGuard(win);
 
-  const devUrl = process.env.ELECTRON_RENDERER_URL
+  const devUrl = process.env.ELECTRON_RENDERER_URL;
   if (!app.isPackaged && devUrl) {
-    void win.loadURL(devUrl)
+    void win.loadURL(devUrl);
   } else {
-    void win.loadFile(join(__dirname, '../renderer/index.html'))
+    void win.loadFile(join(__dirname, '../renderer/index.html'));
   }
 
-  return win
+  return win;
 }

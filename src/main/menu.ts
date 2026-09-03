@@ -1,16 +1,9 @@
-import {
-  app,
-  BrowserWindow,
-  dialog,
-  ipcMain,
-  Menu,
-  MenuItemConstructorOptions
-} from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, MenuItemConstructorOptions } from 'electron';
 
-import { sendCommand } from './io'
-import { checkForUpdates } from './updater'
-import { MENU_TOP_LABELS } from '../shared/menu'
-import type { CommandName } from '../shared/ipc'
+import { sendCommand } from './io';
+import { checkForUpdates } from './updater';
+import { MENU_TOP_LABELS } from '../shared/menu';
+import type { CommandName } from '../shared/ipc';
 
 function item(
   label: string,
@@ -23,12 +16,10 @@ function item(
     accelerator,
     click: (_menuitem, focusedWindow) => {
       const win =
-        focusedWindow instanceof BrowserWindow
-          ? focusedWindow
-          : BrowserWindow.getAllWindows()[0]
-      if (win) sendCommand(win, command, payload)
+        focusedWindow instanceof BrowserWindow ? focusedWindow : BrowserWindow.getAllWindows()[0];
+      if (win) sendCommand(win, command, payload);
     }
-  }
+  };
 }
 
 function buildTemplate(): MenuItemConstructorOptions[] {
@@ -44,10 +35,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         item('另存为…', 'save-as', 'CmdOrCtrl+Shift+S'),
         {
           label: '导出',
-          submenu: [
-            item('导出为 PDF…', 'export:pdf'),
-            item('导出为 HTML…', 'export:html')
-          ]
+          submenu: [item('导出为 PDF…', 'export:pdf'), item('导出为 HTML…', 'export:html')]
         },
         { type: 'separator' },
         { label: '退出', role: 'quit' }
@@ -116,10 +104,15 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         { label: '放大', role: 'zoomIn' },
         { label: '缩小', role: 'zoomOut' },
         { label: '重置缩放', role: 'resetZoom' },
-        { type: 'separator' },
-        { label: '重新加载', role: 'reload' },
-        { label: '强制重新加载', role: 'forceReload' },
-        { label: '开发者工具', role: 'toggleDevTools' }
+        // 重载 / 开发者工具只在开发期暴露（打包版用户不需要）
+        ...(!app.isPackaged
+          ? ([
+              { type: 'separator' },
+              { label: '重新加载', role: 'reload' },
+              { label: '强制重新加载', role: 'forceReload' },
+              { label: '开发者工具', role: 'toggleDevTools' }
+            ] satisfies MenuItemConstructorOptions[])
+          : [])
       ]
     },
     // ---------- 帮助 ----------
@@ -140,16 +133,16 @@ function buildTemplate(): MenuItemConstructorOptions[] {
               message: `Typewren v${app.getVersion()}`,
               detail:
                 '单栏所见即所得 Markdown 编辑器\n基于 Electron + Milkdown (ProseMirror)\n代码高亮：highlight.js · 公式渲染：KaTeX'
-            })
+            });
           }
         }
       ]
     }
-  ]
+  ];
 }
 
 export function installApplicationMenu(): void {
-  Menu.setApplicationMenu(Menu.buildFromTemplate(buildTemplate()))
+  Menu.setApplicationMenu(Menu.buildFromTemplate(buildTemplate()));
 }
 
 /**
@@ -157,16 +150,14 @@ export function installApplicationMenu(): void {
  * Windows 上 nativeTheme 变化后菜单栏不会自动按新配色重绘，需整体重建一次。
  */
 export function refreshApplicationMenu(): void {
-  installApplicationMenu()
+  installApplicationMenu();
 }
 
 /** 取某顶级菜单项的子菜单模板（自绘菜单栏弹出用） */
-function getSubmenuTemplate(
-  label: string
-): MenuItemConstructorOptions[] | null {
-  const top = buildTemplate().find((m) => m.label === label)
-  if (!top || !('submenu' in top) || !Array.isArray(top.submenu)) return null
-  return top.submenu as MenuItemConstructorOptions[]
+function getSubmenuTemplate(label: string): MenuItemConstructorOptions[] | null {
+  const top = buildTemplate().find((m) => m.label === label);
+  if (!top || !('submenu' in top) || !Array.isArray(top.submenu)) return null;
+  return top.submenu as MenuItemConstructorOptions[];
 }
 
 /**
@@ -174,18 +165,23 @@ function getSubmenuTemplate(
  * 由主进程把对应子菜单以原生样式弹出在指定窗口坐标。
  */
 export function registerMenuPopup(): void {
-  ipcMain.on(
-    'menu:popup',
-    (event, payload: { label: string; x: number; y: number }) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (!win || win.isDestroyed()) return
-      const sub = getSubmenuTemplate(payload.label)
-      if (!sub) return
-      Menu.buildFromTemplate(sub).popup({
-        window: win,
-        x: payload.x,
-        y: payload.y
-      })
+  ipcMain.on('menu:popup', (event, payload: { label: string; x: number; y: number }) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return;
+    if (
+      !payload ||
+      typeof payload.label !== 'string' ||
+      typeof payload.x !== 'number' ||
+      typeof payload.y !== 'number'
+    ) {
+      return;
     }
-  )
+    const sub = getSubmenuTemplate(payload.label);
+    if (!sub) return;
+    Menu.buildFromTemplate(sub).popup({
+      window: win,
+      x: payload.x,
+      y: payload.y
+    });
+  });
 }

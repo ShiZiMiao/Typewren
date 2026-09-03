@@ -3,48 +3,46 @@
  * 装配顺序：样式 → 布局骨架 → 编辑器 → UI 组件 → 命令路由
  * ============================================================ */
 
-import '@milkdown/kit/prose/view/style/prosemirror.css'
-import '@milkdown/kit/prose/tables/style/tables.css'
-import '@milkdown/kit/prose/gapcursor/style/gapcursor.css'
-import 'katex/dist/katex.min.css'
+import '@milkdown/kit/prose/view/style/prosemirror.css';
+import '@milkdown/kit/prose/tables/style/tables.css';
+import '@milkdown/kit/prose/gapcursor/style/gapcursor.css';
+import 'katex/dist/katex.min.css';
 
-import './styles/variables.css'
-import './styles/layout.css'
-import './styles/editor.css'
-import './styles/widgets.css'
+import './styles/variables.css';
+import './styles/layout.css';
+import './styles/editor.css';
+import './styles/widgets.css';
+import './styles/search.css';
+import './styles/background.css';
 
-import { createEditor } from '@/editor/createEditor'
-import { buildLayout } from '@/ui/layout'
-import {
-  activeHeadingIndex,
-  createOutlinePanel
-} from '@/ui/outlinePanel'
-import { SourceModeController } from '@/ui/sourceMode'
-import { updateStatusBar } from '@/ui/statusBar'
-import { initThemeToggle } from '@/ui/theme'
-import { createSearchBar } from '@/ui/searchBar'
-import { BackgroundSettingsController } from '@/ui/backgroundSettings'
-import { FileService } from '@/services/fileService'
-import {
-  ImageService,
-  handleImageDrop,
-  handleImagePaste
-} from '@/services/imagePasteService'
-import { registerCommandRouter } from '@/commandRouter'
-import { isMarkdownPath } from '../../shared/ipc'
+import { createEditor } from '@/editor/createEditor';
+import { buildLayout } from '@/ui/layout';
+import { activeHeadingIndex, createOutlinePanel } from '@/ui/outlinePanel';
+import { SourceModeController } from '@/ui/sourceMode';
+import { updateStatusBar } from '@/ui/statusBar';
+import { initThemeToggle } from '@/ui/theme';
+import { createSearchBar } from '@/ui/searchBar';
+import { BackgroundSettingsController } from '@/ui/backgroundSettings';
+import { FileService } from '@/services/fileService';
+import { ImageService, handleImageDrop, handleImagePaste } from '@/services/imagePasteService';
+import { registerCommandRouter } from '@/commandRouter';
+import { isMarkdownPath } from '../../shared/ipc';
 
 /** 大纲刷新防抖等待 */
-const OUTLINE_DEBOUNCE_MS = 120
+const OUTLINE_DEBOUNCE_MS = 120;
 /** 自绘菜单栏点击后去掉高亮的延时 */
-const MENUBAR_HIGHLIGHT_MS = 800
+const MENUBAR_HIGHLIGHT_MS = 800;
 
-const WELCOME_MARKDOWN = `# 欢迎使用 Typewren
+const WELCOME_MARKDOWN =
+  `# 欢迎使用 Typewren
 
 单栏**所见即所得**：输入 Markdown 语法立即渲染，光标移开后只留下排版结果。
 
 ## 快速上手
 
-- 输入 \`# \`` + ` 空格` + ` 把当前行变为标题
+- 输入 \`# \`` +
+  ` 空格` +
+  ` 把当前行变为标题
 - **加粗** 用 \`**\`，*斜体* 用 \`*\`，~~删除线~~ 用 \`~~\`
 - 输入 \`- \`、\`1. \`、\`- [ ] \` 创建三种列表
 - 输入 \`$$\` 后敲空格，插入数学公式块
@@ -78,119 +76,114 @@ $$
 $$
 
 > 按 Ctrl+O 打开 .md 文件，Ctrl+S 保存。
-`
+`;
 
 function debounce<T extends (...args: never[]) => void>(
   fn: T,
   waitMs: number
 ): (...args: Parameters<T>) => void {
-  let timer: number | undefined
+  let timer: number | undefined;
   return (...args: Parameters<T>) => {
-    window.clearTimeout(timer)
-    timer = window.setTimeout(() => fn(...args), waitMs)
-  }
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => fn(...args), waitMs);
+  };
 }
 
 async function bootstrap(): Promise<void> {
-  const layout = buildLayout(document.getElementById('app-root')!)
+  const layout = buildLayout(document.getElementById('app-root')!);
 
   /* ---------- 主题 ---------- */
-  initThemeToggle(layout.btnThemeToggle)
+  initThemeToggle(layout.btnThemeToggle);
 
   /* ---------- 自绘菜单栏：点击顶级项弹出原生子菜单 ---------- */
-  layout.menubar
-    .querySelectorAll<HTMLButtonElement>('.menubar-item')
-    .forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const rect = btn.getBoundingClientRect()
-        window.typewren.popupMenu(
-          btn.dataset.label ?? '',
-          rect.left,
-          rect.bottom
-        )
-        btn.classList.add('open')
-        window.setTimeout(() => btn.classList.remove('open'), MENUBAR_HIGHLIGHT_MS)
-      })
-    })
+  layout.menubar.querySelectorAll<HTMLButtonElement>('.menubar-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const rect = btn.getBoundingClientRect();
+      window.typewren.popupMenu(btn.dataset.label ?? '', rect.left, rect.bottom);
+      btn.classList.add('open');
+      window.setTimeout(() => btn.classList.remove('open'), MENUBAR_HIGHLIGHT_MS);
+    });
+  });
 
   /* ---------- 大纲面板折叠状态 ---------- */
-  const OUTLINE_KEY = 'typewren.outline-collapsed'
-  let outlineCollapsed = localStorage.getItem(OUTLINE_KEY) === '1'
+  const OUTLINE_KEY = 'typewren.outline-collapsed';
+  let outlineCollapsed = localStorage.getItem(OUTLINE_KEY) === '1';
 
   const applyOutlineState = (): void => {
-    layout.app.classList.toggle('outline-collapsed', outlineCollapsed)
-    layout.btnOutlineToggle.textContent = '☰ 大纲'
-    localStorage.setItem(OUTLINE_KEY, outlineCollapsed ? '1' : '0')
-  }
-  applyOutlineState()
+    layout.app.classList.toggle('outline-collapsed', outlineCollapsed);
+    layout.btnOutlineToggle.textContent = '☰ 大纲';
+    localStorage.setItem(OUTLINE_KEY, outlineCollapsed ? '1' : '0');
+  };
+  applyOutlineState();
 
   const toggleOutlinePanel = (): void => {
-    outlineCollapsed = !outlineCollapsed
-    applyOutlineState()
-  }
+    outlineCollapsed = !outlineCollapsed;
+    applyOutlineState();
+  };
 
-  layout.btnOutlineToggle.addEventListener('click', toggleOutlinePanel)
+  layout.btnOutlineToggle.addEventListener('click', toggleOutlinePanel);
 
   document.querySelector('#outline-panel button')?.addEventListener('click', () => {
-    outlineCollapsed = true
-    applyOutlineState()
-  })
+    outlineCollapsed = true;
+    applyOutlineState();
+  });
 
   /* ---------- 创建编辑器 ---------- */
-  // 先建占位服务引用，编辑器回调里再取值（避免初始化时序问题）
-  let fileService!: FileService
-  let outline!: ReturnType<typeof createOutlinePanel>
-  let sourceMode!: SourceModeController
-  let imageService: ImageService | null = null
-
+  // 各服务在 createEditor 之后实例化（编辑器回调只在初始化完成后触发，
+  // 闭包引用后续声明的 const 绑定是安全的；若回调在初始化期间触发会暴露 TDZ，
+  // 属预期的时序缺陷而非静默错误）
   const refreshStatusBar = (): void => {
-    updateStatusBar(instance.editor, layout, sourceMode.getSourceState())
-  }
+    updateStatusBar(instance.editor, layout, sourceMode.getSourceState());
+  };
 
   const refreshOutline = debounce(() => {
-    outline.refresh()
+    outline.refresh();
 
     // 光标所在标题联动高亮
-    const total = layout.outlineTree.querySelectorAll('.outline-item').length
+    const total = layout.outlineTree.querySelectorAll('.outline-item').length;
     if (total > 0) {
-      outline.setActive(activeHeadingIndex(instance.editor, total))
+      outline.setActive(activeHeadingIndex(instance.editor, total));
     } else {
-      outline.setActive(null)
+      outline.setActive(null);
     }
-  }, OUTLINE_DEBOUNCE_MS)
+  }, OUTLINE_DEBOUNCE_MS);
 
   /* ---------- 首次启动显示欢迎页，之后空白 ---------- */
-  const WELCOME_SEEN_KEY = 'typewren.welcome-seen'
-  const isFirstLaunch = !localStorage.getItem(WELCOME_SEEN_KEY)
-  if (isFirstLaunch) localStorage.setItem(WELCOME_SEEN_KEY, '1')
+  const WELCOME_SEEN_KEY = 'typewren.welcome-seen';
+  const isFirstLaunch = !localStorage.getItem(WELCOME_SEEN_KEY);
+  if (isFirstLaunch) localStorage.setItem(WELCOME_SEEN_KEY, '1');
 
   const instance = await createEditor({
     root: layout.editorHost,
     initialMarkdown: isFirstLaunch ? WELCOME_MARKDOWN : '',
     onMarkdownUpdated: () => fileService.handleDocUpdated(),
     onViewChanged: () => {
-      refreshStatusBar()
-      refreshOutline()
+      refreshStatusBar();
+      refreshOutline();
     },
-    onPaste: (event) =>
-      imageService ? handleImagePaste(imageService, event) : false
-  })
+    onPaste: (event) => (imageService ? handleImagePaste(imageService, event) : false)
+  });
 
   /* ---------- 初始化各模块 ---------- */
-  fileService = new FileService(window.typewren, instance.editor)
+  const fileService = new FileService(window.typewren, instance.editor);
   fileService.onTitleChange = (title) => {
-    layout.titlebarTitle.textContent = title
-  }
-  sourceMode = new SourceModeController(
+    layout.titlebarTitle.textContent = title;
+  };
+  const sourceMode = new SourceModeController(
     instance.editor,
     fileService,
     layout.app,
     layout.sourceTextarea,
     layout.btnSourceToggle,
     refreshStatusBar
-  )
-  outline = createOutlinePanel(instance.editor, layout.outlineTree)
-  imageService = new ImageService(window.typewren, instance.editor, fileService)
+  );
+  const outline = createOutlinePanel(instance.editor, layout.outlineTree, {
+    isSourceMode: () => sourceMode.isActive,
+    sourceEl: () => layout.sourceTextarea
+  });
+  // 源码模式：光标移动 → 大纲 active 高亮联动
+  sourceMode.onCaretMove = (text, pos) => outline.updateActiveFromSource(text, pos);
+  const imageService = new ImageService(window.typewren, instance.editor, fileService);
 
   /* ---------- 搜索栏 ---------- */
   const searchBar = createSearchBar(
@@ -198,33 +191,33 @@ async function bootstrap(): Promise<void> {
     () => sourceMode.isActive,
     () => layout.sourceTextarea,
     instance.editor
-  )
+  );
 
   /* ---------- 背景图片设置 ---------- */
-  const backgroundSettings = new BackgroundSettingsController()
+  const backgroundSettings = new BackgroundSettingsController();
   layout.btnBackgroundSettings.addEventListener('click', () => {
-    backgroundSettings.togglePanel()
-  })
+    backgroundSettings.togglePanel();
+  });
 
-  outline.refresh()
-  refreshStatusBar()
-  fileService.markBaseline()
+  outline.refresh();
+  refreshStatusBar();
+  fileService.markBaseline();
 
   /* ---------- Ctrl+F / Ctrl+H 全局快捷键 ---------- */
   const handleCtrlFH = (e: KeyboardEvent): void => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-      e.preventDefault()
-      e.stopPropagation()
-      searchBar.toggle()
+      e.preventDefault();
+      e.stopPropagation();
+      searchBar.toggle();
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'h') {
-      e.preventDefault()
-      e.stopPropagation()
-      searchBar.toggle()
-      searchBar.toggleReplace()
+      e.preventDefault();
+      e.stopPropagation();
+      searchBar.toggle();
+      searchBar.toggleReplace();
     }
-  }
-  document.addEventListener('keydown', handleCtrlFH, true)
-  layout.sourceTextarea.addEventListener('keydown', handleCtrlFH)
+  };
+  document.addEventListener('keydown', handleCtrlFH, true);
+  layout.sourceTextarea.addEventListener('keydown', handleCtrlFH);
 
   /* ---------- 主进程命令路由（菜单 / 全局快捷键） ---------- */
   registerCommandRouter({
@@ -235,84 +228,87 @@ async function bootstrap(): Promise<void> {
     searchBar,
     layout,
     toggleOutlinePanel
-  })
+  });
 
   /* ---------- 拖拽文件到窗口：新窗口打开 ---------- */
   const handleDragOver = (e: DragEvent): void => {
-    e.preventDefault()
-    e.stopPropagation()
-  }
+    e.preventDefault();
+    e.stopPropagation();
+  };
 
-const handleDrop = (e: DragEvent): void => {
-    e.preventDefault()
-    e.stopPropagation()
-    const files = Array.from(e.dataTransfer?.files ?? [])
+  const handleDrop = (e: DragEvent): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = Array.from(e.dataTransfer?.files ?? []);
 
     // 原有逻辑：拖入 .md → 当前窗口空文档就地打开，否则新窗口打开
-    const mdFiles = files.filter((file) => isMarkdownPath(file.name))
+    const mdFiles = files.filter((file) => isMarkdownPath(file.name));
     if (mdFiles.length > 0) {
       for (const file of mdFiles) {
-        const filePath = window.typewren.getPathForFile(file)
-        const isEmpty = !fileService.getFilePath() && !fileService.isDirty
+        const filePath = window.typewren.getPathForFile(file);
+        const isEmpty = !fileService.getFilePath() && !fileService.isDirty;
         if (isEmpty) {
           void window.typewren.readFileContent(filePath).then((result) => {
             if (result) {
-              void fileService.loadContentFromPath(result.path, result.content)
+              void fileService.loadContentFromPath(result.path, result.content);
             }
-          })
+          });
         } else {
-          window.typewren.openFileInNewWindow(filePath)
+          window.typewren.openFileInNewWindow(filePath);
         }
       }
-      return
+      return;
     }
 
     // 图片文件 / 网络图片 URL → 本地化后插入编辑器
-    if (imageService) handleImageDrop(imageService, e)
-  }
+    if (imageService) handleImageDrop(imageService, e);
+  };
 
   // 使用捕获阶段，确保在 ProseMirror 处理之前拦截
-  document.addEventListener('dragover', handleDragOver, true)
-  document.addEventListener('drop', handleDrop, true)
+  document.addEventListener('dragover', handleDragOver, true);
+  document.addEventListener('drop', handleDrop, true);
 
   /* ---------- 重新加载前保存当前文档状态 ---------- */
-  const RELOAD_STATE_KEY = 'typewren.reload-state'
+  const RELOAD_STATE_KEY = 'typewren.reload-state';
 
   window.addEventListener('beforeunload', () => {
-    const filePath = fileService.getFilePath()
-    const markdown = fileService.getRawMarkdown()
+    const filePath = fileService.getFilePath();
+    const markdown = fileService.getRawMarkdown();
     // 只在有内容时保存
     if (markdown || filePath) {
-      sessionStorage.setItem(
-        RELOAD_STATE_KEY,
-        JSON.stringify({ filePath, markdown })
-      )
+      sessionStorage.setItem(RELOAD_STATE_KEY, JSON.stringify({ filePath, markdown }));
     }
-  })
+  });
 
   // 检查是否有重新加载前保存的状态
-  const savedState = sessionStorage.getItem(RELOAD_STATE_KEY)
+  const savedState = sessionStorage.getItem(RELOAD_STATE_KEY);
   if (savedState) {
-    sessionStorage.removeItem(RELOAD_STATE_KEY)
+    sessionStorage.removeItem(RELOAD_STATE_KEY);
     try {
       const parsed = JSON.parse(savedState) as {
-        filePath?: unknown
-        markdown?: unknown
-      }
-      const { filePath, markdown } = parsed
+        filePath?: unknown;
+        markdown?: unknown;
+      };
+      const { filePath, markdown } = parsed;
       if (typeof markdown === 'string' && markdown) {
         await fileService.loadContentFromPath(
           typeof filePath === 'string' ? filePath : '',
           markdown
-        )
-        outline.refresh()
+        );
+        outline.refresh();
       }
     } catch {
       // 解析失败忽略
     }
   }
 
-  instance.focus()
+  instance.focus();
 }
 
-void bootstrap()
+void bootstrap().catch((error) => {
+  console.error('Typewren 渲染进程初始化失败：', error);
+  const root = document.getElementById('app-root');
+  if (root) {
+    root.textContent = `初始化失败：${String(error)}`;
+  }
+});

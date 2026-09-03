@@ -1,5 +1,5 @@
-import { Plugin } from '@milkdown/kit/prose/state'
-import type { EditorView } from '@milkdown/kit/prose/view'
+import { Plugin } from '@milkdown/kit/prose/state';
+import type { EditorView } from '@milkdown/kit/prose/view';
 import {
   addColumnAfter,
   addColumnBefore,
@@ -8,8 +8,8 @@ import {
   deleteTable,
   addRowAfter,
   addRowBefore
-} from '@milkdown/kit/prose/tables'
-import { $prose } from '@milkdown/kit/utils'
+} from '@milkdown/kit/prose/tables';
+import { $prose } from '@milkdown/kit/utils';
 
 /* ============================================================
  * 表格可视化编辑工具条：
@@ -18,14 +18,14 @@ import { $prose } from '@milkdown/kit/utils'
  * ============================================================ */
 
 interface ToolButtonDef {
-  label: string
-  title: string
+  label: string;
+  title: string;
   command: (
     state: EditorView['state'],
     dispatch: EditorView['dispatch'] | undefined,
     view: EditorView
-  ) => boolean
-  danger?: boolean
+  ) => boolean;
+  danger?: boolean;
 }
 
 const BUTTONS: (ToolButtonDef | 'sep')[] = [
@@ -53,138 +53,137 @@ const BUTTONS: (ToolButtonDef | 'sep')[] = [
     command: deleteTable,
     danger: true
   }
-]
+];
 
 /** 工具条与表格之间的垂直间距 */
-const TOOLBAR_GAP_PX = 8
+const TOOLBAR_GAP_PX = 8;
 /** 工具条与视口边缘的最小留白 */
-const VIEWPORT_MARGIN_PX = 6
+const VIEWPORT_MARGIN_PX = 6;
 /** 工具条与视口右侧的最小间距 */
-const TOOLBAR_SIDE_GAP_PX = 12
+const TOOLBAR_SIDE_GAP_PX = 12;
 
-let toolbarEl: HTMLElement | null = null
-let activeView: EditorView | null = null
+let toolbarEl: HTMLElement | null = null;
+let activeView: EditorView | null = null;
 
 function findTablePos(view: EditorView): number | null {
-  const $from = view.state.selection.$from
+  const $from = view.state.selection.$from;
   for (let depth = $from.depth; depth > 0; depth--) {
-    const node = $from.node(depth)
-    if (node.type.name === 'table') return $from.before(depth)
+    const node = $from.node(depth);
+    if (node.type.name === 'table') return $from.before(depth);
   }
-  return null
+  return null;
 }
 
 function ensureToolbar(): HTMLElement {
-  if (toolbarEl && toolbarEl.isConnected) return toolbarEl
+  if (toolbarEl && toolbarEl.isConnected) return toolbarEl;
 
-  const bar = document.createElement('div')
-  bar.id = 'typewren-table-tools'
+  const bar = document.createElement('div');
+  bar.id = 'typewren-table-tools';
 
   const runCommand =
     (command: ToolButtonDef['command']) =>
     (event: Event): void => {
-      event.preventDefault()
-      const view = activeView
-      if (!view || view.isDestroyed) return
+      event.preventDefault();
+      const view = activeView;
+      if (!view || view.isDestroyed) return;
 
       // 仅当光标仍在表格内时执行，避免按钮残留导致的误操作
       if (findTablePos(view) === null) {
-        hide()
-        return
+        hide();
+        return;
       }
 
-      command(view.state, view.dispatch, view)
-      view.focus()
-      sync(view)
-    }
+      command(view.state, view.dispatch, view);
+      view.focus();
+      sync(view);
+    };
 
   for (const def of BUTTONS) {
     if (def === 'sep') {
-      const sep = document.createElement('span')
-      sep.className = 'tt-sep'
-      bar.appendChild(sep)
-      continue
+      const sep = document.createElement('span');
+      sep.className = 'tt-sep';
+      bar.appendChild(sep);
+      continue;
     }
 
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.textContent = def.label
-    btn.title = def.title
-    if (def.danger) btn.classList.add('danger')
-    btn.addEventListener('pointerdown', runCommand(def.command))
-    bar.appendChild(btn)
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = def.label;
+    btn.title = def.title;
+    if (def.danger) btn.classList.add('danger');
+    btn.addEventListener('pointerdown', runCommand(def.command));
+    bar.appendChild(btn);
   }
 
-  document.body.appendChild(bar)
-  toolbarEl = bar
-  return bar
+  document.body.appendChild(bar);
+  toolbarEl = bar;
+  return bar;
 }
 
 function positionToolbar(view: EditorView, tablePos: number): void {
-  const tableDom = view.nodeDOM(tablePos) as HTMLElement | null
-  if (!tableDom || !toolbarEl) return
+  const tableDom = view.nodeDOM(tablePos) as HTMLElement | null;
+  if (!tableDom || !toolbarEl) return;
 
-  const rect = tableDom.getBoundingClientRect()
-  const barRect = toolbarEl.getBoundingClientRect()
+  const rect = tableDom.getBoundingClientRect();
+  const barRect = toolbarEl.getBoundingClientRect();
 
-  let top = rect.top - barRect.height - TOOLBAR_GAP_PX
-  if (top < VIEWPORT_MARGIN_PX) top = rect.bottom + TOOLBAR_GAP_PX
+  let top = rect.top - barRect.height - TOOLBAR_GAP_PX;
+  if (top < VIEWPORT_MARGIN_PX) top = rect.bottom + TOOLBAR_GAP_PX;
 
-  let left = rect.left
-  const maxLeft = window.innerWidth - barRect.width - TOOLBAR_SIDE_GAP_PX
-  if (left > maxLeft) left = Math.max(VIEWPORT_MARGIN_PX, maxLeft)
+  let left = rect.left;
+  const maxLeft = window.innerWidth - barRect.width - TOOLBAR_SIDE_GAP_PX;
+  if (left > maxLeft) left = Math.max(VIEWPORT_MARGIN_PX, maxLeft);
 
-  toolbarEl.style.top = `${Math.round(top)}px`
-  toolbarEl.style.left = `${Math.round(left)}px`
+  toolbarEl.style.top = `${Math.round(top)}px`;
+  toolbarEl.style.left = `${Math.round(left)}px`;
 }
 
 function sync(view: EditorView): void {
-  const tablePos =
-    view.dom.offsetParent === null ? null : findTablePos(view)
+  const tablePos = view.dom.offsetParent === null ? null : findTablePos(view);
 
   if (tablePos === null || !view.dom.isConnected) {
-    hide()
-    return
+    hide();
+    return;
   }
 
-  ensureToolbar().classList.add('visible')
-  positionToolbar(view, tablePos)
+  ensureToolbar().classList.add('visible');
+  positionToolbar(view, tablePos);
 }
 
 function hide(): void {
-  toolbarEl?.classList.remove('visible')
+  toolbarEl?.classList.remove('visible');
 }
 
 export const tableTools = $prose(() => {
   return new Plugin({
     view(editorView: EditorView) {
-      activeView = editorView
+      activeView = editorView;
 
       const onReposition = (): void => {
         if (activeView && !activeView.isDestroyed && toolbarEl?.classList.contains('visible')) {
-          const pos = findTablePos(activeView)
-          if (pos !== null) positionToolbar(activeView, pos)
-          else hide()
+          const pos = findTablePos(activeView);
+          if (pos !== null) positionToolbar(activeView, pos);
+          else hide();
         }
-      }
+      };
 
-      window.addEventListener('resize', onReposition)
-      window.addEventListener('scroll', onReposition, true)
+      window.addEventListener('resize', onReposition);
+      window.addEventListener('scroll', onReposition, true);
 
-      sync(editorView)
+      sync(editorView);
 
       return {
         update(view: EditorView): void {
-          activeView = view
-          sync(view)
+          activeView = view;
+          sync(view);
         },
         destroy(): void {
-          window.removeEventListener('resize', onReposition)
-          window.removeEventListener('scroll', onReposition, true)
-          hide()
-          activeView = null
+          window.removeEventListener('resize', onReposition);
+          window.removeEventListener('scroll', onReposition, true);
+          hide();
+          activeView = null;
         }
-      }
+      };
     }
-  })
-})
+  });
+});

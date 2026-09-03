@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 代码规范检查
+        run: npx eslint src tests
+
+      - name: 格式检查
+        run: npx prettier --check .
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 构建（e2e 依赖 out/ 产物）
+        run: npx electron-vite build
+
+      - name: E2E 测试
+        run: npx playwright test
+
+      - name: 失败时上传测试产物
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7

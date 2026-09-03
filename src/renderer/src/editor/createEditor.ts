@@ -4,19 +4,20 @@ import {
   editorViewCtx,
   editorViewOptionsCtx,
   rootCtx
-} from '@milkdown/kit/core'
-import { commonmark } from '@milkdown/kit/preset/commonmark'
-import { gfm, tableSchema } from '@milkdown/kit/preset/gfm'
-import { Plugin } from '@milkdown/kit/prose/state'
-import type { Node as ProseNode } from '@milkdown/kit/prose/model'
-import type { EditorView, NodeView } from '@milkdown/kit/prose/view'
-import { history } from '@milkdown/kit/plugin/history'
-import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
-import { trailing } from '@milkdown/kit/plugin/trailing'
-import { cursor } from '@milkdown/kit/plugin/cursor'
-import { $prose, $view } from '@milkdown/kit/utils'
+} from '@milkdown/kit/core';
+import { commonmark } from '@milkdown/kit/preset/commonmark';
+import { gfm, tableSchema } from '@milkdown/kit/preset/gfm';
+import { Plugin } from '@milkdown/kit/prose/state';
+import type { Node as ProseNode } from '@milkdown/kit/prose/model';
+import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
+import { history } from '@milkdown/kit/plugin/history';
+import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
+import { trailing } from '@milkdown/kit/plugin/trailing';
+import { cursor } from '@milkdown/kit/plugin/cursor';
+import { $prose, $view } from '@milkdown/kit/utils';
 
-import { highlight, configureCodeHighlight } from './highlight'
+import { highlight, configureCodeHighlight } from './highlight';
+import { applyStrikethroughFixes } from './strikethroughFix';
 import {
   blockMathEmptyInputRule,
   blockMathFullInputRule,
@@ -26,9 +27,9 @@ import {
   mathInlineSchema,
   mathInlineView,
   remarkMathPlugin
-} from './math'
-import { tableTools } from './tableTools'
-import { taskListToggle } from './taskToggle'
+} from './math';
+import { tableTools } from './tableTools';
+import { taskListToggle } from './taskToggle';
 
 /* ============================================================
  * Typewren 编辑器装配
@@ -37,80 +38,75 @@ import { taskListToggle } from './taskToggle'
  * ============================================================ */
 
 export interface ViewChangeKind {
-  kind: 'doc' | 'selection'
+  kind: 'doc' | 'selection';
 }
 
 export interface CreateEditorOptions {
   /** 编辑器挂载点 */
-  root: HTMLElement
+  root: HTMLElement;
   /** 初始 Markdown 内容 */
-  initialMarkdown: string
+  initialMarkdown: string;
   /** 文档内容变化（已序列化为 Markdown）——用于脏状态检测 */
-  onMarkdownUpdated: (markdown: string) => void
+  onMarkdownUpdated: (markdown: string) => void;
   /** 视图变化 —— 用于状态栏与大纲联动 */
-  onViewChanged: (change: ViewChangeKind) => void
+  onViewChanged: (change: ViewChangeKind) => void;
   /**
    * 粘贴拦截（可选）：返回 true 表示已处理（如图片落盘），
    * 不再交给 ProseMirror 默认行为。
    */
-  onPaste?: (event: ClipboardEvent) => boolean
+  onPaste?: (event: ClipboardEvent) => boolean;
 }
 
 export interface EditorInstance {
-  editor: Editor
-  view(): EditorView
-  focus(): void
+  editor: Editor;
+  view(): EditorView;
+  focus(): void;
 }
 
-export async function createEditor(
-  options: CreateEditorOptions
-): Promise<EditorInstance> {
+export async function createEditor(options: CreateEditorOptions): Promise<EditorInstance> {
   /** 文档 / 选区变化通知插件 */
   const viewEvents = $prose(() => {
     return new Plugin({
       view(_view: EditorView) {
-        const notify = (
-          current: EditorView['state'],
-          previous: EditorView['state']
-        ): void => {
+        const notify = (current: EditorView['state'], previous: EditorView['state']): void => {
           if (!previous.doc.eq(current.doc)) {
-            options.onViewChanged({ kind: 'doc' })
+            options.onViewChanged({ kind: 'doc' });
           } else if (!previous.selection.eq(current.selection)) {
-            options.onViewChanged({ kind: 'selection' })
+            options.onViewChanged({ kind: 'selection' });
           }
-        }
+        };
         return {
           update(view: EditorView, prevState: EditorView['state']): void {
-            notify(view.state, prevState)
+            notify(view.state, prevState);
           }
-        }
+        };
       }
-    })
-  })
+    });
+  });
 
   /** 空文档占位提示 */
   const emptyDocPlaceholder = $prose(() => {
     return new Plugin({
       view(view: EditorView) {
         const apply = (v: EditorView): void => {
-          const doc = v.state.doc
+          const doc = v.state.doc;
           const isEmpty =
             doc.childCount === 0 ||
             (doc.childCount === 1 &&
               doc.firstChild?.type.name === 'paragraph' &&
-              doc.firstChild.textContent.length === 0)
-          v.dom.classList.toggle('is-doc-empty', isEmpty)
-        }
+              doc.firstChild.textContent.length === 0);
+          v.dom.classList.toggle('is-doc-empty', isEmpty);
+        };
 
-        apply(view)
+        apply(view);
         return {
           update(v: EditorView): void {
-            apply(v)
+            apply(v);
           }
-        }
+        };
       }
-    })
-  })
+    });
+  });
 
   /**
    * 表格横向滚动包裹层（nodeView 方案）：
@@ -120,24 +116,24 @@ export async function createEditor(
    */
   const tableScrollView = $view(tableSchema.node, () => {
     return (_node: ProseNode, _view: EditorView, _getPos: () => number | undefined): NodeView => {
-      const wrapper = document.createElement('div')
-      wrapper.className = 'table-scroll-wrapper'
-      const table = document.createElement('table')
-      const tbody = document.createElement('tbody')
-      table.appendChild(tbody)
-      wrapper.appendChild(table)
+      const wrapper = document.createElement('div');
+      wrapper.className = 'table-scroll-wrapper';
+      const table = document.createElement('table');
+      const tbody = document.createElement('tbody');
+      table.appendChild(tbody);
+      wrapper.appendChild(table);
       return {
         dom: wrapper,
         contentDOM: tbody,
         update: (n: ProseNode) => n.type.name === 'table'
-      }
-    }
-  })
+      };
+    };
+  });
 
   const editor = await Editor.make()
     .config((ctx) => {
-      ctx.set(rootCtx, options.root)
-      ctx.set(defaultValueCtx, options.initialMarkdown)
+      ctx.set(rootCtx, options.root);
+      ctx.set(defaultValueCtx, options.initialMarkdown);
 
       ctx.update(editorViewOptionsCtx, (prev) => ({
         ...prev,
@@ -147,17 +143,20 @@ export async function createEditor(
           class: 'typewren-prosemirror'
         },
         handlePaste: (_view, event) => {
-          if (options.onPaste) return options.onPaste(event)
-          return false
+          if (options.onPaste) return options.onPaste(event);
+          return false;
         }
-      }))
+      }));
 
-      configureCodeHighlight(ctx)
+      configureCodeHighlight(ctx);
 
-      const listenerManager = ctx.get(listenerCtx)
+      // Fix strikethrough: single ~ parsed as strikethrough + ~~ escaped as \~\~
+      applyStrikethroughFixes(ctx);
+
+      const listenerManager = ctx.get(listenerCtx);
       listenerManager.markdownUpdated((_ctx, markdown) => {
-        options.onMarkdownUpdated(markdown)
-      })
+        options.onMarkdownUpdated(markdown);
+      });
     })
     .use(commonmark)
     .use(gfm)
@@ -179,15 +178,15 @@ export async function createEditor(
     .use(tableScrollView)
     .use(viewEvents)
     .use(emptyDocPlaceholder)
-    .create()
+    .create();
 
   function view(): EditorView {
-    return editor.action((ctx) => ctx.get(editorViewCtx))
+    return editor.action((ctx) => ctx.get(editorViewCtx));
   }
 
   return {
     editor,
     view,
     focus: () => view().focus()
-  }
+  };
 }

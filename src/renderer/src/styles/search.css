@@ -1,0 +1,119 @@
+/* ---------- 搜索栏 ---------- */
+#search-bar-container {
+  position: relative;
+  z-index: 50;
+}
+
+#search-bar {
+  position: fixed;
+  top: calc(var(--titlebar-height) + var(--menubar-height) + 8px);
+  right: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+  width: 320px;
+}
+
+#search-input {
+  width: 220px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 8px;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+
+#search-input:focus {
+  border-color: var(--accent);
+}
+
+#search-match-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 40px;
+  text-align: center;
+  user-select: none;
+}
+
+#search-prev,
+#search-next,
+#search-toggle-replace,
+#search-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  user-select: none;
+}
+
+#search-prev:hover,
+#search-next:hover,
+#search-toggle-replace:hover,
+#search-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* ---------- 替换行 ---------- */
+#replace-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+#replace-input {
+  flex: 1;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 8px;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+
+#replace-input:focus {
+  border-color: var(--accent);
+}
+
+#btn-replace,
+#btn-replace-all {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  user-select: none;
+}
+
+#btn-replace:hover,
+#btn-replace-all:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}

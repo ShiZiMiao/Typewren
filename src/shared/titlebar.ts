@@ -6,15 +6,15 @@
 
 export interface TitleBarPalette {
   /** 标题栏按钮区底色（即 titleBarOverlay.color） */
-  color: string
+  color: string;
   /** 标题栏按钮字形色（即 titleBarOverlay.symbolColor） */
-  symbolColor: string
+  symbolColor: string;
 }
 
 export const TITLEBAR_PALETTE: {
-  light: TitleBarPalette
-  dark: TitleBarPalette
+  light: TitleBarPalette;
+  dark: TitleBarPalette;
 } = {
   light: { color: '#f8f9fb', symbolColor: '#6a737d' },
   dark: { color: '#23282e', symbolColor: '#8b96a3' }
-}
+};

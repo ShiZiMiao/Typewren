@@ -29,6 +29,13 @@ nsis:
 
 compression: maximum
 
+# 更新源：electron-updater 运行时读打包内的 app-update.yml。
+# 本地 npm run dist 不发布（只产出 latest.yml）；推送 GitHub 时经 CI 带 --publish 发布。
+publish:
+  provider: github
+  owner: ShiZiMiao
+  repo: Typewren
+
 fileAssociations:
   - ext: md
     name: Markdown

@@ -27,8 +27,14 @@
   --accent: #2f7ef0;
   --accent-soft: rgba(47, 126, 240, 0.12);
   --danger: #d9534f;
+  --danger-soft: rgba(217, 83, 79, 0.12);
   --selection: rgba(47, 126, 240, 0.22);
   --shadow: 0 4px 16px rgba(20, 30, 45, 0.14);
+
+  /* 搜索栏匹配高亮（CSS ::highlight(search-*)） */
+  --search-hit: #fff3a8;
+  --search-hit-current: #ff9632;
+  --search-hit-current-outline: #e07000;
 
   /* 编辑区 */
   --editor-max-width: min(90vw, 1200px);
@@ -66,8 +72,13 @@
   --accent: #58a1ff;
   --accent-soft: rgba(88, 161, 255, 0.16);
   --danger: #e06c60;
+  --danger-soft: rgba(224, 108, 96, 0.16);
   --selection: rgba(88, 161, 255, 0.28);
   --shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+
+  --search-hit: #5a4a00;
+  --search-hit-current: #b8860b;
+  --search-hit-current-outline: #daa520;
 
   --code-bg: #171a1f;
   --code-border: #2b313a;
@@ -96,9 +107,7 @@ body {
 }
 
 body {
-  font-family:
-    -apple-system, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC',
-    'Helvetica Neue', Arial, sans-serif;
+  font-family: -apple-system, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Helvetica Neue', Arial, sans-serif;
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
