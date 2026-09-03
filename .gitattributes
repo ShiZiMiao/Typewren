@@ -1,0 +1,9 @@
+# 统一行尾：仓库内一律 LF（Prettier endOfLine=lf 与 CI 检查依赖此约定）
+* text=auto eol=lf
+
+# 二进制资源不转换
+*.png binary
+*.ico binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
