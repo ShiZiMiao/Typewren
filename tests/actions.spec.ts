@@ -12,10 +12,22 @@ test.afterAll(async () => {
 });
 
 test.describe('格式命令（cmd 通道直达 actions）', () => {
-  test('加粗切换：全选→加粗→取消', async () => {
-    await loadContent(app, '需要加粗的文字内容');
+  /**
+   * 点击编辑区并全选，等待 PM 的 DOM 选区同步完成（异步 selectionchange），
+   * 否则紧接着的 format:* 命令会读到空选区（CI 慢机偶发失败）。
+   */
+  async function selectAll(): Promise<void> {
     await app.window.locator('.ProseMirror').click();
     await app.window.keyboard.press('Control+a');
+    await app.window.waitForFunction(() => {
+      const sel = window.getSelection();
+      return !!sel && sel.rangeCount > 0 && sel.toString().length > 0;
+    });
+  }
+
+  test('加粗切换：全选→加粗→取消', async () => {
+    await loadContent(app, '需要加粗的文字内容');
+    await selectAll();
     await app.window.waitForTimeout(200);
     await sendCommand(app, 'format:bold');
     await expect(app.window.locator('.ProseMirror strong')).toHaveCount(1);
@@ -26,8 +38,7 @@ test.describe('格式命令（cmd 通道直达 actions）', () => {
 
   test('斜体 / 删除线 / 行内代码切换', async () => {
     await loadContent(app, '待格式化内容');
-    await app.window.locator('.ProseMirror').click();
-    await app.window.keyboard.press('Control+a');
+    await selectAll();
 
     await sendCommand(app, 'format:italic');
     await expect(app.window.locator('.ProseMirror em')).toHaveCount(1);
@@ -156,8 +167,7 @@ test.describe('格式命令（cmd 通道直达 actions）', () => {
 
   test('选中文本加链接', async () => {
     await loadContent(app, '这里有个链接');
-    await app.window.locator('.ProseMirror').click();
-    await app.window.keyboard.press('Control+a');
+    await selectAll();
     await sendCommand(app, 'format:link');
     const dialog = app.window.locator('#prompt-dialog');
     await expect(dialog).toBeVisible({ timeout: 5000 });
@@ -190,9 +200,7 @@ test.describe('格式命令（cmd 通道直达 actions）', () => {
 
   test('撤销（history 插件）', async () => {
     await loadContent(app, '撤销测试文本');
-    await app.window.locator('.ProseMirror').click();
-    await app.window.keyboard.press('Control+a');
-    await app.window.waitForTimeout(200);
+    await selectAll();
     await sendCommand(app, 'format:bold');
     await expect(app.window.locator('.ProseMirror strong')).toHaveCount(1);
 
