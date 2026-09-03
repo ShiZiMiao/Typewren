@@ -13,16 +13,19 @@ test.afterAll(async () => {
 
 test.describe('格式命令（cmd 通道直达 actions）', () => {
   /**
-   * 点击编辑区并全选，等待 PM 的 DOM 选区同步完成（异步 selectionchange），
-   * 否则紧接着的 format:* 命令会读到空选区（CI 慢机偶发失败）。
+   * 全选编辑器内容：直接设置 DOM 选区（PM 经 selectionchange 同步 state.selection）。
+   * 不用键盘 Ctrl+A——CI 无焦点窗口下键盘事件不可靠（偶发空选区导致 format:* 空操作）。
    */
   async function selectAll(): Promise<void> {
-    await app.window.locator('.ProseMirror').click();
-    await app.window.keyboard.press('Control+a');
-    await app.window.waitForFunction(() => {
+    await app.window.evaluate(() => {
+      const pm = document.querySelector('.ProseMirror') as HTMLElement;
       const sel = window.getSelection();
-      return !!sel && sel.rangeCount > 0 && sel.toString().length > 0;
+      const range = document.createRange();
+      range.selectNodeContents(pm);
+      sel?.removeAllRanges();
+      sel?.addRange(range);
     });
+    await app.window.waitForFunction(() => (window.getSelection()?.toString().length ?? 0) > 0);
   }
 
   test('加粗切换：全选→加粗→取消', async () => {
