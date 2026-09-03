@@ -131,12 +131,16 @@ const isDelete = strikeAst.children[0].children[0].type === 'delete';
 report.push({ name: 'strike-ast', pass: isDelete });
 if (!isDelete) failures.push({ name: 'strike-ast', detail: 'delete node missing' });
 
-// 真实文件回归：D:/test.md（引用块 + 列表 + _/~ 混合，含原文自带转义 D1\~D2）
+// 真实文件回归：tests/fixtures/real-doc.md（引用块 + 列表 + _/~ 混合，含原文自带转义 D1\~D2）
 // 单元层复刻的是“序列化路径”（编辑后/保存前状态）：字节级原样由
 // sourceMode.spec 的 e2e 覆盖（干净态显示磁盘原文），这里只断言语义无损：
 // 文本内容一致，且文件里“不带转义的 ~/_”未被加转义。
+// 注意：fixture 必须随仓库分发，不得读取开发机绝对路径（CI 无此文件）。
 import { readFileSync } from 'node:fs';
-const realMd = readFileSync('D:/test.md', 'utf-8').replace(/\r\n/g, '\n');
+const realMd = readFileSync(new URL('./fixtures/real-doc.md', import.meta.url), 'utf-8').replace(
+  /\r\n/g,
+  '\n'
+);
 const realOut = getMarkdownShim(realMd.replace(/\n+$/, ''));
 const realOk =
   textContentOf(toTree(realOut)) === textContentOf(toTree(realMd)) && !realOut.includes('\\_');
