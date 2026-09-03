@@ -4,5 +4,5 @@ dist/
 node_modules/
 test-results/
 playwright-report/
-package-lock.jsontests/fixtures/
-
+package-lock.json
+tests/fixtures/
