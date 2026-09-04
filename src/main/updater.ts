@@ -67,6 +67,20 @@ function notesText(notes: unknown): string {
   return String(notes ?? '');
 }
 
+/** 把 electron-updater 的原始错误转成对用户简洁的提示 */
+function errorDetail(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  // 最常见：发布时漏传 latest.yml（GitHub 对任何 404 都提示检查 token，易误导用户）
+  if (/Cannot find latest\.yml in the latest release artifacts/.test(raw)) {
+    return '更新源缺少 latest.yml（该版本发布不完整）。\n请确认发布时已随安装包上传 latest.yml 文件。';
+  }
+  // HttpError 消息附带完整 HTTP 响应头与请求转储（"method: ..." / Headers: {...}），
+  // 对用户无意义，只保留错误主体首段
+  const cut = raw.search(/[\r\n]+"?method: GET|[\r\n]+Headers:/);
+  const brief = cut >= 0 ? raw.slice(0, cut) : raw;
+  return brief.trim() || '未知错误';
+}
+
 /** 注册更新事件（checkForUpdates 首次调用时执行一次） */
 function registerUpdaterEvents(): void {
   if (eventsRegistered) return;
@@ -127,7 +141,7 @@ function registerUpdaterEvents(): void {
       type: 'error',
       title: 'Typewren',
       message: '检查更新失败',
-      detail: String(error?.message ?? error),
+      detail: errorDetail(error),
       buttons: ['确定']
     });
   });
@@ -165,7 +179,7 @@ export async function checkForUpdates(silent = false): Promise<void> {
         type: 'error',
         title: 'Typewren',
         message: '检查更新失败',
-        detail: String(error instanceof Error ? error.message : error),
+        detail: errorDetail(error),
         buttons: ['确定']
       });
     }

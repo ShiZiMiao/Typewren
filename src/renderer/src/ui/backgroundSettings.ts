@@ -10,32 +10,85 @@ export interface BackgroundSettings {
   opacity: number;
   blur: number;
   size: 'cover' | 'contain' | 'auto';
+  /** CSS background-position 百分比串（如 '50% 100%'），由拖动预览框写回 */
   position: string;
+  /** 滚轮缩放倍数（≥1，作用于 cover/contain/auto 基准尺寸之上） */
+  zoom: number;
 }
 
 const DEFAULT_SETTINGS: BackgroundSettings = {
   imageUrl: '',
-  opacity: 0.3,
-  blur: 0,
+  opacity: 0.5,
+  blur: 2.5,
   size: 'cover',
-  position: 'center'
+  position: '50% 100%',
+  zoom: 1
 };
+
+/** 旧版本关键字位置 → 百分比（固定值/九宫格时代无拖动预览）。
+ *  center/bottom 系当时无控件写死的默认值，并非用户选择，统一落到当前默认（下）。 */
+const LEGACY_POSITIONS: Record<string, string> = {
+  'left top': '0% 0%',
+  'center top': '50% 0%',
+  'right top': '100% 0%',
+  'left center': '0% 50%',
+  center: '50% 100%',
+  'right center': '100% 50%',
+  'left bottom': '0% 100%',
+  'center bottom': '50% 100%',
+  'right bottom': '100% 100%',
+  bottom: '50% 100%'
+};
+
+const isPercentPosition = (value: string): boolean => /^-?\d+(\.\d+)?% -?\d+(\.\d+)?%$/.test(value);
 
 export class BackgroundSettingsController {
   private settings: BackgroundSettings;
   private panel: HTMLElement | null = null;
   private overlay: HTMLElement | null = null;
+  private dragBox: HTMLElement | null = null;
+  private dragImg: HTMLImageElement | null = null;
+  private dragHint: HTMLElement | null = null;
+  private zoomValueEl: HTMLSpanElement | null = null;
+  private imgNatural: { w: number; h: number } | null = null;
+  private dragOffsets: { left: number; top: number } | null = null;
 
   constructor() {
     this.settings = this.loadSettings();
     this.applySettings();
+    // 编辑器区域尺寸变化（窗口缩放/大纲折叠）时重算 px 背景尺寸
+    const observer = new ResizeObserver(() => this.applySettings());
+    const container = document.getElementById('editor-container');
+    const source = document.getElementById('source-editor');
+    if (container) observer.observe(container);
+    if (source) observer.observe(source);
   }
 
   private loadSettings(): BackgroundSettings {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+        const parsed = JSON.parse(saved) as BackgroundSettings;
+        const storedPosition = parsed.position ?? '';
+        return {
+          ...DEFAULT_SETTINGS,
+          ...parsed,
+          // 旧版本 position 是关键字（'center'/'bottom'/九宫格值），迁到百分比；
+          // 已是百分比串（拖动预览框写入）的原样保留
+          position: isPercentPosition(storedPosition)
+            ? storedPosition
+            : (LEGACY_POSITIONS[storedPosition] ?? DEFAULT_SETTINGS.position),
+          // 旧默认值（透明度 0.3 / 模糊 0）视为从未调过，跟进新默认；用户改过的值原样保留
+          opacity:
+            parsed.opacity === 0.3
+              ? DEFAULT_SETTINGS.opacity
+              : (parsed.opacity ?? DEFAULT_SETTINGS.opacity),
+          blur: parsed.blur === 0 ? DEFAULT_SETTINGS.blur : (parsed.blur ?? DEFAULT_SETTINGS.blur),
+          zoom:
+            typeof parsed.zoom === 'number' && Number.isFinite(parsed.zoom) && parsed.zoom >= 1
+              ? parsed.zoom
+              : DEFAULT_SETTINGS.zoom
+        };
       }
     } catch {
       // 解析失败使用默认值
@@ -55,7 +108,7 @@ export class BackgroundSettingsController {
       root.style.setProperty('--bg-image-url', `url('${this.settings.imageUrl}')`);
       root.style.setProperty('--bg-image-opacity', String(this.settings.opacity));
       root.style.setProperty('--bg-image-blur', `${this.settings.blur}px`);
-      root.style.setProperty('--bg-image-size', this.settings.size);
+      root.style.setProperty('--bg-image-size', this.effectiveBackgroundSize());
       root.style.setProperty('--bg-image-position', this.settings.position);
       app?.classList.add('has-background');
     } else {
@@ -66,6 +119,30 @@ export class BackgroundSettingsController {
       root.style.removeProperty('--bg-image-size');
       root.style.removeProperty('--bg-image-position');
     }
+  }
+
+  /** 编辑器背景尺寸：cover/contain/auto 基准 × 滚轮缩放，算成 px（编辑区实时测量，缩放随窗口自适应） */
+  private effectiveBackgroundSize(): string {
+    if (!this.imgNatural) return this.settings.size; // 图片未加载完成，先用 CSS 关键字兜底
+    const area = this.measureBgArea();
+    if (area.w <= 0 || area.h <= 0) return this.settings.size;
+    const { w, h } = this.imgNatural;
+    let scale =
+      this.settings.size === 'cover'
+        ? Math.max(area.w / w, area.h / h)
+        : this.settings.size === 'contain'
+          ? Math.min(area.w / w, area.h / h)
+          : 1;
+    scale *= this.settings.zoom;
+    return `${Math.round(w * scale * 100) / 100}px ${Math.round(h * scale * 100) / 100}px`;
+  }
+
+  private measureBgArea(): { w: number; h: number } {
+    const container = document.getElementById('editor-container');
+    const source = document.getElementById('source-editor');
+    const el = container && container.offsetWidth > 0 ? container : source;
+    if (!el) return { w: 0, h: 0 };
+    return { w: el.clientWidth, h: el.clientHeight };
   }
 
   togglePanel(): void {
@@ -147,6 +224,9 @@ export class BackgroundSettingsController {
     // 尺寸选择
     const sizeSection = this.createSizeSection();
 
+    // 显示区域选择
+    const positionSection = this.createPositionSection();
+
     // 重置按钮
     const resetBtn = document.createElement('button');
     resetBtn.type = 'button';
@@ -166,6 +246,7 @@ export class BackgroundSettingsController {
       opacitySection,
       blurSection,
       sizeSection,
+      positionSection,
       resetBtn
     );
 
@@ -192,6 +273,7 @@ export class BackgroundSettingsController {
       this.settings.imageUrl = urlInput.value.trim();
       this.applySettings();
       this.saveSettings();
+      this.refreshDragPreview();
     });
 
     const fileBtn = document.createElement('button');
@@ -212,6 +294,7 @@ export class BackgroundSettingsController {
           urlInput.value = this.settings.imageUrl;
           this.applySettings();
           this.saveSettings();
+          this.refreshDragPreview();
         };
         reader.readAsDataURL(file);
       }
@@ -227,6 +310,7 @@ export class BackgroundSettingsController {
       urlInput.value = '';
       this.applySettings();
       this.saveSettings();
+      this.refreshDragPreview();
     });
 
     inputRow.append(urlInput, fileBtn, fileInput, clearBtn);
@@ -310,12 +394,199 @@ export class BackgroundSettingsController {
         btn.classList.add('active');
         this.applySettings();
         this.saveSettings();
+        this.layoutDragImage();
       });
       btnGroup.appendChild(btn);
     });
 
     section.append(label, btnGroup);
     return section;
+  }
+
+  private createPositionSection(): HTMLElement {
+    const section = document.createElement('div');
+    section.className = 'bg-settings-section';
+
+    const label = document.createElement('label');
+    label.className = 'bg-settings-label bg-settings-label-row';
+    label.textContent = '显示区域（拖动移动 / 滚轮缩放）';
+    const zoomValue = document.createElement('span');
+    zoomValue.className = 'bg-settings-zoom-value';
+    label.appendChild(zoomValue);
+    this.zoomValueEl = zoomValue;
+
+    // 预览框模拟编辑区：图片按 cover/contain/auto 尺寸铺入，拖动选择显示区域，滚轮缩放
+    const box = document.createElement('div');
+    box.className = 'bg-settings-drag-box';
+    this.dragBox = box;
+
+    const img = document.createElement('img');
+    img.className = 'bg-settings-drag-img';
+    img.alt = '背景图位置预览';
+    img.draggable = false; // 自实现 pointer 拖动，避免原生拖拽
+    img.hidden = true;
+    box.appendChild(img);
+    this.dragImg = img;
+
+    const hint = document.createElement('div');
+    hint.className = 'bg-settings-drag-hint';
+    box.appendChild(hint);
+    this.dragHint = hint;
+
+    img.addEventListener('pointerdown', (e) => {
+      if (!this.dragOffsets || e.button !== 0) return;
+      e.preventDefault();
+      img.setPointerCapture(e.pointerId);
+      img.classList.add('dragging');
+      const startLeft = this.dragOffsets.left;
+      const startTop = this.dragOffsets.top;
+      const startX = e.clientX;
+      const startY = e.clientY;
+
+      const onMove = (ev: PointerEvent) => {
+        const { left, top } = this.clampDragOffset(
+          startLeft + ev.clientX - startX,
+          startTop + ev.clientY - startY
+        );
+        this.setDragOffset(left, top, true);
+      };
+      const onUp = (ev: PointerEvent) => {
+        img.releasePointerCapture(ev.pointerId);
+        img.classList.remove('dragging');
+        img.removeEventListener('pointermove', onMove);
+        img.removeEventListener('pointerup', onUp);
+        img.removeEventListener('pointercancel', onUp);
+        this.saveSettings();
+      };
+      img.addEventListener('pointermove', onMove);
+      img.addEventListener('pointerup', onUp);
+      img.addEventListener('pointercancel', onUp);
+    });
+
+    // 滚轮缩放（preventDefault 防止滚动面板）
+    box.addEventListener('wheel', this.onWheelBound, { passive: false });
+
+    section.append(label, box);
+    return section;
+  }
+
+  /** 滚轮缩放：1~5 倍，作用在 cover/contain/auto 基准尺寸之上 */
+  private handleWheel(e: WheelEvent): void {
+    if (!this.imgNatural || !this.settings.imageUrl) return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    const zoom = Math.min(5, Math.max(1, Math.round(this.settings.zoom * factor * 100) / 100));
+    if (zoom === this.settings.zoom) return;
+    this.settings.zoom = zoom;
+    this.applySettings();
+    this.layoutDragImage();
+    this.saveSettings();
+    this.updateZoomValue();
+  }
+
+  private updateZoomValue(): void {
+    if (this.zoomValueEl) this.zoomValueEl.textContent = `×${this.settings.zoom.toFixed(1)}`;
+  }
+
+  private onWheelBound = (e: WheelEvent): void => this.handleWheel(e);
+
+  /** 拖动范围：cover 时图片大于框（左/上 ∈ [框-图, 0]），contain/auto 时图片在框内 */
+  private clampDragOffset(left: number, top: number): { left: number; top: number } {
+    const box = this.dragBox;
+    const img = this.dragImg;
+    if (!box || !img) return { left, top };
+    const bw = box.clientWidth;
+    const bh = box.clientHeight;
+    const iw = img.offsetWidth;
+    const ih = img.offsetHeight;
+    const clamp = (v: number, size: number) =>
+      Math.min(Math.max(v, Math.min(0, size)), Math.max(0, size));
+    return { left: clamp(left, bw - iw), top: clamp(top, bh - ih) };
+  }
+
+  /** 更新图片像素偏移；(sync) 时换算回百分比串写入设置并应用到编辑器 */
+  private setDragOffset(left: number, top: number, sync: boolean): void {
+    const box = this.dragBox;
+    const img = this.dragImg;
+    if (!box || !img) return;
+    this.dragOffsets = { left, top };
+    img.style.left = `${left}px`;
+    img.style.top = `${top}px`;
+    if (sync) {
+      const bw = box.clientWidth;
+      const bh = box.clientHeight;
+      const iw = img.offsetWidth;
+      const ih = img.offsetHeight;
+      // background-position 百分比：0% 左对齐、100% 右对齐，与像素偏移线性对应
+      const x = bw - iw === 0 ? 50 : (left / (bw - iw)) * 100;
+      const y = bh - ih === 0 ? 50 : (top / (bh - ih)) * 100;
+      this.settings.position = `${Math.round(x * 100) / 100}% ${Math.round(y * 100) / 100}%`;
+      this.applySettings();
+    }
+  }
+
+  private parsePositionPercent(position: string): { x: number; y: number } {
+    const [x, y] = position.split(' ').map((v) => parseFloat(v));
+    return { x: Number.isFinite(x) ? x : 50, y: Number.isFinite(y) ? y : 50 };
+  }
+
+  /** 按当前尺寸设置重算预览图的大小与偏移（从百分比反算像素） */
+  private layoutDragImage(): void {
+    const box = this.dragBox;
+    const img = this.dragImg;
+    if (!box || !img || !this.imgNatural) return;
+    const bw = box.clientWidth;
+    const bh = box.clientHeight;
+    const { w, h } = this.imgNatural;
+    let scale =
+      this.settings.size === 'cover'
+        ? Math.max(bw / w, bh / h)
+        : this.settings.size === 'contain'
+          ? Math.min(bw / w, bh / h)
+          : 1;
+    scale *= this.settings.zoom;
+    const iw = w * scale;
+    const ih = h * scale;
+    img.style.width = `${iw}px`;
+    img.style.height = `${ih}px`;
+    const { x, y } = this.parsePositionPercent(this.settings.position);
+    this.setDragOffset((bw - iw) * (x / 100), (bh - ih) * (y / 100), false);
+  }
+
+  /** 重新加载预览图并定位（图片 URL/尺寸变化、面板重新打开时调用） */
+  private refreshDragPreview(): void {
+    const box = this.dragBox;
+    const img = this.dragImg;
+    const hint = this.dragHint;
+    if (!box || !img || !hint) return;
+    this.imgNatural = null;
+    const url = this.settings.imageUrl;
+    if (!url) {
+      img.hidden = true;
+      hint.textContent = '请先选择背景图片';
+      return;
+    }
+    const probe = new Image();
+    probe.onload = () => {
+      // 防止快速切换 URL 时旧回包覆盖
+      if (probe.src !== this.settings.imageUrl) return;
+      this.imgNatural = {
+        w: probe.naturalWidth || probe.width,
+        h: probe.naturalHeight || probe.height
+      };
+      img.src = probe.src;
+      img.hidden = false;
+      hint.textContent = '';
+      this.layoutDragImage();
+      // 图片尺寸已知后才能算 px 背景尺寸
+      this.applySettings();
+      this.updateZoomValue();
+    };
+    probe.onerror = () => {
+      img.hidden = true;
+      hint.textContent = '图片加载失败';
+    };
+    probe.src = url;
   }
 
   private updateUI(): void {
@@ -347,5 +618,9 @@ export class BackgroundSettingsController {
     this.panel.querySelectorAll('.bg-settings-size-btn').forEach((btn) => {
       btn.classList.toggle('active', (btn as HTMLElement).dataset.value === this.settings.size);
     });
+
+    // 每次打开面板按当前设置重新定位预览图（面板只创建一次）
+    this.updateZoomValue();
+    this.refreshDragPreview();
   }
 }

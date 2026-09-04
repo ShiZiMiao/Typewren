@@ -30,7 +30,10 @@ nsis:
 compression: maximum
 
 # 更新源：electron-updater 运行时读打包内的 app-update.yml。
-# 本地 npm run dist 不发布（只产出 latest.yml）；推送 GitHub 时经 CI 带 --publish 发布。
+# 本地 npm run dist 只产出 release/ 安装包 + latest.yml，不自动发布（CI 无发布任务）。
+# 手动发布（gh release upload）时 latest.yml 必须与安装包一并上传：
+# electron-updater 按 releases/download/v<版本>/latest.yml 拉元数据，缺失即 404
+# 报「检查更新失败」。或改用 electron-builder --publish always 自动上传全部产物。
 publish:
   provider: github
   owner: ShiZiMiao

@@ -7,19 +7,29 @@
 #app.has-background #editor-container::before,
 #app.has-background #source-editor::before {
   content: '';
-  position: absolute;
-  top: 0;
+  /* 固定壁纸：钉在编辑区视口，不随内容滚动/增删移动。
+     若用 position:absolute，伪元素会锚在滚动内容原点（文档顶部）
+     并随滚动滚出视野 —— 曾导致图片只在第一屏可见。 */
+  position: fixed;
+  top: calc(var(--titlebar-height) + var(--menubar-height));
+  bottom: var(--statusbar-height);
   left: 0;
   right: 0;
-  bottom: 0;
+  transition: left 0.22s ease;
   background-image: var(--bg-image-url);
   background-size: var(--bg-image-size, cover);
-  background-position: var(--bg-image-position, center);
+  background-position: var(--bg-image-position, center bottom);
   background-repeat: no-repeat;
-  opacity: var(--bg-image-opacity, 0.3);
-  filter: blur(var(--bg-image-blur, 0));
+  opacity: var(--bg-image-opacity, 0.5);
+  filter: blur(var(--bg-image-blur, 2.5));
   pointer-events: none;
   z-index: 0;
+}
+
+/* 大纲面板展开时编辑区左移 --outline-width，壁纸边界跟随 */
+#app.has-background:not(.outline-collapsed) #editor-container::before,
+#app.has-background:not(.outline-collapsed) #source-editor::before {
+  left: var(--outline-width);
 }
 
 #app.has-background #editor-container > *,
@@ -110,6 +120,19 @@
   font-weight: 500;
   color: var(--text);
   margin-bottom: 6px;
+}
+
+/* 显示区域一行：左侧说明，右侧缩放倍数指示 */
+.bg-settings-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bg-settings-zoom-value {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .bg-settings-value {
@@ -213,6 +236,42 @@
   background: var(--accent);
   border-color: var(--accent);
   color: white;
+}
+
+/* ---------- 显示区域：拖动预览 ---------- */
+.bg-settings-drag-box {
+  position: relative;
+  width: 100%;
+  height: 170px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  user-select: none;
+}
+
+.bg-settings-drag-img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  cursor: grab;
+  touch-action: none;
+  filter: blur(var(--bg-image-blur, 2.5px));
+}
+
+.bg-settings-drag-img.dragging {
+  cursor: grabbing;
+}
+
+.bg-settings-drag-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  font-size: 12px;
+  pointer-events: none;
 }
 
 .bg-settings-reset {
