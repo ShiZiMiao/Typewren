@@ -38,7 +38,7 @@ const NODE_CLASS: Record<string, string> = {
   ATXHeading6: 'section',
   SetextHeading1: 'section',
   SetextHeading2: 'section',
-  // 引用：整块（含行内内容）淡色，符合 Typora 式引用观感
+  // 引用：整块（含行内内容）淡色
   Blockquote: 'quote',
   QuoteMark: 'quote',
   // 列表符（- / 1. 等标记本身）
