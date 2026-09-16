@@ -22,6 +22,9 @@ import {
   wrapInListKind
 } from '@/editor/actions';
 import { toggleTheme } from '@/ui/theme';
+import type { WritingModes } from '@/ui/writingModes';
+import type { SpellcheckController } from '@/ui/spellcheck';
+import type { AutoPairsController } from '@/editor/autoPairs';
 
 /* ============================================================
  * 命令路由：主进程菜单 / 快捷键命令 (cmd 通道) → 编辑器与 UI 操作
@@ -35,7 +38,10 @@ export interface CommandRouterDeps {
   outline: OutlineController;
   searchBar: SearchBar;
   layout: AppLayout;
-  toggleOutlinePanel: () => void;
+  toggleSidebar: () => void;
+  writingModes: WritingModes;
+  spellcheck: SpellcheckController;
+  autoPairs: AutoPairsController;
 }
 
 export function registerCommandRouter(deps: CommandRouterDeps): void {
@@ -59,11 +65,31 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
       case 'save-and-close':
         void fileService.saveThenClose();
         break;
+      case 'discard-close':
+        // 关闭保护中选择"不保存"：清理草稿后强制关闭
+        fileService.abandonForClose();
+        break;
+      case 'global:show-in-folder': {
+        const filePath = fileService.getFilePath();
+        if (filePath) window.typewren.showInFolder(filePath);
+        break;
+      }
+      case 'file:open-smart':
+        if (typeof payload === 'string') {
+          void fileService.openSmart(payload);
+        }
+        break;
       case 'export:pdf':
         void exportDocument(editor, fileService, 'pdf');
         break;
       case 'export:html':
         void exportDocument(editor, fileService, 'html');
+        break;
+      case 'export:docx':
+        void exportDocument(editor, fileService, 'docx');
+        break;
+      case 'export:png':
+        void exportDocument(editor, fileService, 'png');
         break;
       case 'open-file-path':
         if (isFileContentPayload(payload)) {
@@ -142,12 +168,25 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
         sourceMode.toggle();
         break;
       case 'view:outline':
-        deps.toggleOutlinePanel();
+        // 侧边栏（文件/大纲卡片）整体收起/弹出
+        deps.toggleSidebar();
         break;
       case 'view:theme': {
         layout.btnThemeToggle.textContent = toggleTheme() === 'dark' ? '☀ 亮色' : '☾ 暗色';
         break;
       }
+      case 'view:focus-mode':
+        deps.writingModes.toggleFocus();
+        break;
+      case 'view:typewriter-mode':
+        deps.writingModes.toggleTypewriter();
+        break;
+      case 'edit:spellcheck':
+        deps.spellcheck.toggle();
+        break;
+      case 'edit:auto-pairs':
+        deps.autoPairs.toggle();
+        break;
 
       default:
         break;

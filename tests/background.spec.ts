@@ -200,6 +200,19 @@ test.describe('背景图片-拖动选择显示区域', () => {
     await app.window.waitForTimeout(500);
     await openPanel();
 
+    // 预览图是 dataURI/异步解码装配（probe.onload 布局），无头下加载较慢：
+    // 轮询等 img 有布局尺寸，避免读到尚未装配的 0 尺寸导致百分比反算错
+    await expect
+      .poll(
+        async () =>
+          app.window.evaluate(() => {
+            const img = document.querySelector<HTMLImageElement>('.bg-settings-drag-img');
+            return img ? img.offsetHeight : -1;
+          }),
+        { timeout: 10000 }
+      )
+      .toBeGreaterThan(0);
+
     // 位置变量与持久化一致
     const after = await readDragState();
     expect(after.pos).toBe(before.pos);

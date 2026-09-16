@@ -22,7 +22,11 @@ export async function launchApp(extraArgs: string[] = []): Promise<AppHandle> {
   await window.waitForSelector('.ProseMirror', { timeout: 15000 });
   // 等 Milkdown 首帧渲染与启动基线落定
   await window.waitForTimeout(600);
-  return { app, window };
+  const handle = { app, window };
+  // 默认安装对话框打桩：新代码路径（外部修改确认等）意外触达原生弹窗时
+  // 不会挂死测试；需要特定选择的用例再 setDialog 覆盖
+  await installDialogStubs(handle);
+  return handle;
 }
 
 export async function closeApp(handle: AppHandle): Promise<void> {
@@ -88,18 +92,29 @@ export interface DialogConfig {
   saveAs?: string | null;
   /** showOpenDialog 返回的文件路径；null = 模拟取消 */
   open?: string | null;
-  /** showMessageBoxSync（放弃更改/关闭保护）按钮：0=保存 1=不保存 2=取消 */
+  /** 关闭保护/放弃更改确认（按按钮组识别）：0=保存 1=不保存/放弃 2=取消 */
   discard?: 0 | 1 | 2;
+  /** 其它通用确认框（dialog:confirm）返回的按钮下标，默认 0（第一按钮） */
+  confirm?: number;
 }
 
 export function installDialogStubs(handle: AppHandle, cfg: DialogConfig = {}): Promise<void> {
   return handle.app.evaluate(({ dialog: d }, init) => {
     const g = globalThis as { __dlg: { cfg: Record<string, unknown> } };
-    g.__dlg = { cfg: { saveAs: null, open: null, discard: 1, ...init } };
+    g.__dlg = { cfg: { saveAs: null, open: null, discard: 1, confirm: 0, ...init } };
+    // 注意：本回调会被序列化到主进程执行，只能引用自身/参数内的符号
+    const pick = (args: unknown[]): number => {
+      const opts = (args.length > 1 ? args[1] : args[0]) as { buttons?: string[] };
+      const key = (opts?.buttons ?? []).join('|');
+      const isGuard = key === '保存|不保存|取消' || key === '保存|放弃更改|取消';
+      const c = g.__dlg.cfg;
+      return isGuard ? ((c.discard as number) ?? 1) : ((c.confirm as number) ?? 0);
+    };
     const e = d as unknown as {
       showSaveDialog: (...args: unknown[]) => Promise<{ canceled: boolean; filePath?: string }>;
       showOpenDialog: (...args: unknown[]) => Promise<{ canceled: boolean; filePaths?: string[] }>;
-      showMessageBoxSync: () => number;
+      showMessageBoxSync: (...args: unknown[]) => number;
+      showMessageBox: (...args: unknown[]) => Promise<{ response: number }>;
     };
     e.showSaveDialog = async () => {
       const p = g.__dlg.cfg.saveAs as string | null;
@@ -109,7 +124,8 @@ export function installDialogStubs(handle: AppHandle, cfg: DialogConfig = {}): P
       const p = g.__dlg.cfg.open as string | null;
       return p ? { canceled: false, filePaths: [p] } : { canceled: true };
     };
-    e.showMessageBoxSync = () => (g.__dlg.cfg.discard as number) ?? 1;
+    e.showMessageBoxSync = (...args: unknown[]) => pick(args);
+    e.showMessageBox = async (...args: unknown[]) => ({ response: pick(args) });
   }, cfg);
 }
 

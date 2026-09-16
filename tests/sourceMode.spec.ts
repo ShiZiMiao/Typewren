@@ -263,4 +263,111 @@ test.describe('源码模式', () => {
     expect(text).toBe(content);
     await setSourceMode(false);
   });
+
+  test('渲染→源码：光标定位到同一行源码', async () => {
+    const content =
+      '# 标题一\n\n第一段内容用于定位。\n\n第二段内容用于定位。\n\n第三段内容用于定位。\n';
+    await loadContent(app, content);
+
+    // 光标点进渲染视图的第三段
+    await app.window.locator('.ProseMirror p').nth(2).click();
+    await app.window.waitForTimeout(150);
+
+    await setSourceMode(true);
+
+    // 源码光标所在行应为第三段文本（而非回到文档开头）
+    const caretLine = await app.window.evaluate(() => {
+      const el = document.getElementById('source-textarea');
+      const sel = window.getSelection();
+      if (!el || !sel || sel.rangeCount === 0) return '';
+      const range = sel.getRangeAt(0);
+      const pre = range.cloneRange();
+      pre.selectNodeContents(el);
+      pre.setEnd(range.startContainer, range.startOffset);
+      // 光标所在行 = 光标起点到下一个换行（光标恰在行首时前缀以 \n 结尾，
+      // 不能用前缀的最后一个分片）
+      return (el.textContent ?? '').slice(pre.toString().length).split('\n')[0] ?? '';
+    });
+    expect(caretLine).toContain('第三段内容用于定位');
+
+    // 该行在源码区视口内可见（顶部对齐定位生效）
+    await expect
+      .poll(() =>
+        app.window.evaluate(() => {
+          const el = document.getElementById('source-textarea');
+          const sel = window.getSelection();
+          if (!el || !sel || sel.rangeCount === 0) return false;
+          const rect = sel.getRangeAt(0).getBoundingClientRect();
+          const er = el.getBoundingClientRect();
+          return rect.top >= er.top - 1 && rect.bottom <= er.bottom + 1;
+        })
+      )
+      .toBe(true);
+
+    await setSourceMode(false);
+  });
+
+  test('渲染→源码：长文档切换瞬移到对应行顶部（无滚动动画）', async () => {
+    // 构建 30 段长文档，光标放在第 10 段（附近内容足够多，可完整对齐顶部；
+    // 若选太靠近文档末尾，滚动会被 max-scroll 钳制——那不是对齐的问题）
+    const paragraphs = Array.from({ length: 30 }, (_, i) => `第${i + 1}段内容用于长文档定位测试。`);
+    const content = `${paragraphs.join('\n\n')}\n`;
+    await loadContent(app, content);
+
+    await app.window.locator('.ProseMirror p').nth(9).click();
+    await app.window.waitForTimeout(150);
+
+    await setSourceMode(true);
+
+    // 光标行应顶到源码区顶部（与渲染模式跳转一致，且 rAF 一帧内到位）
+    const topGap = await app.window.evaluate(() => {
+      const el = document.getElementById('source-textarea');
+      const sel = window.getSelection();
+      if (!el || !sel || sel.rangeCount === 0) return -1;
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      return rect.top - el.getBoundingClientRect().top;
+    });
+    expect(topGap).toBeGreaterThanOrEqual(-2);
+    expect(topGap).toBeLessThan(60);
+
+    // 瞬时定位：进入后短暂等待即应稳定（smooth 动画此时仍在滚动中）
+    await app.window.waitForTimeout(150);
+    const stable = await app.window.evaluate(() => {
+      const el = document.getElementById('source-textarea');
+      const sel = window.getSelection();
+      if (!el || !sel || sel.rangeCount === 0) return -1;
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      return rect.top - el.getBoundingClientRect().top;
+    });
+    expect(stable).toBe(topGap);
+
+    await setSourceMode(false);
+  });
+
+  test('源码→渲染：光标回到渲染视图同一块', async () => {
+    const content =
+      '# 标题一\n\n第一段内容用于定位。\n\n第二段内容用于定位。\n\n第三段内容用于定位。\n';
+    await loadContent(app, content);
+    await setSourceMode(true);
+
+    // 源码光标移到第三段行（Ctrl+Home 后向下 6 行：含两个空行分隔）
+    await app.window.keyboard.press('Control+Home');
+    for (let i = 0; i < 6; i++) await app.window.keyboard.press('ArrowDown');
+    await app.window.waitForTimeout(150);
+
+    await setSourceMode(false);
+
+    // PM 选区（DOM 选区随之同步）应落在第三段块内
+    await expect
+      .poll(() =>
+        app.window.evaluate(() => {
+          const sel = window.getSelection();
+          if (!sel || sel.rangeCount === 0) return null;
+          const p = sel.getRangeAt(0).startContainer.parentElement;
+          const block = p?.closest('p, li, h1, h2, h3, h4, h5, h6, blockquote, pre');
+          return block?.textContent ?? null;
+        })
+      )
+      .toBe('第三段内容用于定位。');
+  });
 });

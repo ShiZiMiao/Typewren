@@ -2,34 +2,305 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { readFileSync, readdirSync, promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 
+import {
+  Document,
+  HeadingLevel,
+  Packer,
+  Paragraph,
+  Table,
+  TableCell,
+  TableRow,
+  TextRun,
+  WidthType,
+  BorderStyle,
+  AlignmentType,
+  ExternalHyperlink
+} from 'docx';
+
 import type { ExportDocumentPayload, ExportDocumentResult } from '../shared/ipc';
 import { isExportDocumentPayload } from '../shared/ipc';
 
 /* ============================================================
- * 导出 PDF / HTML（主进程侧）
+ * 导出 PDF / HTML / Docx / PNG（主进程侧）
  * 渲染层已拼好完整 HTML 页面（内联样式 + KaTeX 渲染结果），
  * 这里负责：另存为对话框 → KaTeX 字体内联（自包含）→ 写盘 / 打印。
+ * docx 由渲染层传入结构化块（docxExport.ts），此处用 docx 库构造；
+ * png 复用导出 HTML 由隐藏窗口整页截图。
  * ============================================================ */
+
+interface DocxTextLike {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  strike?: boolean;
+  code?: boolean;
+  underline?: boolean;
+  href?: string;
+}
+
+interface DocxBlockLike {
+  type: string;
+  level?: number;
+  runs?: DocxTextLike[];
+  bullet?: string;
+  checked?: boolean;
+  quote?: boolean;
+  text?: string;
+  language?: string;
+  rows?: DocxTextLike[][][];
+  header?: boolean;
+}
+
+function runOf(t: DocxTextLike): TextRun {
+  return new TextRun({
+    text: t.text,
+    bold: t.bold,
+    italics: t.italic,
+    strike: t.strike,
+    underline: t.underline ? { type: 'single' } : undefined,
+    // 行内代码：docx 无法方便设等宽字体字距，用 Consolas 近似
+    font: t.code ? 'Consolas' : undefined
+  });
+}
+
+function runsOf(runs: DocxTextLike[] = []): (TextRun | ExternalHyperlink)[] {
+  const out: (TextRun | ExternalHyperlink)[] = [];
+  for (const t of runs) {
+    if (t.href) {
+      out.push(
+        new ExternalHyperlink({
+          link: t.href,
+          children: [new TextRun({ text: t.text, style: 'Hyperlink' })]
+        })
+      );
+    } else {
+      out.push(runOf(t));
+    }
+  }
+  return out;
+}
+
+function paragraphOf(block: DocxBlockLike): Paragraph {
+  if (block.quote) {
+    const quoteParas: Paragraph[] = [];
+    const runs = runsOf(block.runs);
+    quoteParas.push(
+      new Paragraph({
+        children: runs,
+        indent: { left: 720 },
+        border: {
+          left: { style: BorderStyle.SINGLE, size: 12, color: 'CCCCCC', space: 6 }
+        }
+      })
+    );
+    return quoteParas[0];
+  }
+
+  if (block.bullet === 'task') {
+    const mark = block.checked ? '☑ ' : '☐ ';
+    return new Paragraph({
+      children: [new TextRun({ text: mark }), ...runsOf(block.runs)],
+      bullet: { level: block.level ?? 0 }
+    });
+  }
+
+  if (block.bullet === 'ordered') {
+    return new Paragraph({
+      children: runsOf(block.runs),
+      numbering: {
+        reference: 'ordered-list',
+        level: block.level ?? 0
+      }
+    });
+  }
+
+  if (block.bullet === 'bullet') {
+    return new Paragraph({
+      children: runsOf(block.runs),
+      bullet: { level: block.level ?? 0 }
+    });
+  }
+
+  return new Paragraph({ children: runsOf(block.runs) });
+}
+
+function tableOf(block: DocxBlockLike): Table {
+  const rows = (block.rows ?? []).map(
+    (cells, rowIndex) =>
+      new TableRow({
+        children: cells.map(
+          (cell) =>
+            new TableCell({
+              width: { size: 20, type: WidthType.PERCENTAGE },
+              children: [
+                new Paragraph({
+                  children: runsOf(cell),
+                  shading:
+                    rowIndex === 0 && block.header
+                      ? { fill: 'F2F2F2', type: 'clear', color: 'auto' }
+                      : undefined
+                })
+              ]
+            })
+        )
+      })
+  );
+  return new Table({
+    rows,
+    width: { size: 100, type: WidthType.PERCENTAGE }
+  });
+}
+
+function codeParagraphs(block: DocxBlockLike): Paragraph[] {
+  const lines = (block.text ?? '').split('\n');
+  return lines.map(
+    (line) =>
+      new Paragraph({
+        children: [new TextRun({ text: line, font: 'Consolas', size: 18 })],
+        spacing: { after: 0 },
+        shading: { fill: 'F5F5F5', type: 'clear', color: 'auto' },
+        indent: { left: 360 }
+      })
+  );
+}
+
+function headingOf(block: DocxBlockLike): Paragraph {
+  const map: Record<number, (typeof HeadingLevel)[keyof typeof HeadingLevel]> = {
+    1: HeadingLevel.HEADING_1,
+    2: HeadingLevel.HEADING_2,
+    3: HeadingLevel.HEADING_3,
+    4: HeadingLevel.HEADING_4,
+    5: HeadingLevel.HEADING_5,
+    6: HeadingLevel.HEADING_6
+  };
+  return new Paragraph({
+    children: runsOf(block.runs),
+    heading: map[block.level ?? 1] ?? HeadingLevel.HEADING_1
+  });
+}
+
+function buildDocxDoc(blocks: DocxBlockLike[]): Document {
+  const children: (Paragraph | Table)[] = [];
+  for (const block of blocks) {
+    switch (block.type) {
+      case 'heading':
+        children.push(headingOf(block));
+        break;
+      case 'paragraph':
+        children.push(paragraphOf(block));
+        break;
+      case 'code':
+        children.push(...codeParagraphs(block));
+        break;
+      case 'table':
+        children.push(tableOf(block));
+        break;
+      case 'toc':
+        children.push(
+          new Paragraph({
+            children: [new TextRun({ text: '[目录，请用 Word 更新域]', italics: true })],
+            spacing: { before: 200, after: 200 }
+          })
+        );
+        break;
+      default:
+        children.push(new Paragraph({ children: [new TextRun({ text: block.text ?? '' })] }));
+        break;
+    }
+  }
+
+  return new Document({
+    numbering: {
+      config: [
+        {
+          reference: 'ordered-list',
+          levels: [
+            {
+              level: 0,
+              format: 'decimal',
+              text: '%1.',
+              alignment: AlignmentType.START,
+              style: {
+                paragraph: { indent: { left: 720, hanging: 360 } }
+              }
+            },
+            {
+              level: 1,
+              format: 'lowerLetter',
+              text: '%2.',
+              alignment: AlignmentType.START,
+              style: {
+                paragraph: { indent: { left: 1440, hanging: 360 } }
+              }
+            },
+            {
+              level: 2,
+              format: 'lowerRoman',
+              text: '%3.',
+              alignment: AlignmentType.START,
+              style: {
+                paragraph: { indent: { left: 2160, hanging: 360 } }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    sections: [
+      {
+        properties: {},
+        children
+      }
+    ],
+    styles: {
+      default: {
+        document: {
+          run: {
+            font: 'Calibri',
+            size: 22
+          },
+          paragraph: {
+            spacing: { line: 300 }
+          }
+        }
+      }
+    }
+  });
+}
 
 /** 导出对话框过滤器 */
 function exportFilters(kind: ExportDocumentPayload['kind']): Electron.FileFilter[] {
-  return kind === 'pdf'
-    ? [{ name: 'PDF 文档', extensions: ['pdf'] }]
-    : [{ name: 'HTML 文档', extensions: ['html'] }];
+  switch (kind) {
+    case 'pdf':
+      return [{ name: 'PDF 文档', extensions: ['pdf'] }];
+    case 'docx':
+      return [{ name: 'Word 文档', extensions: ['docx'] }];
+    case 'png':
+      return [{ name: 'PNG 图片', extensions: ['png'] }];
+    default:
+      return [{ name: 'HTML 文档', extensions: ['html'] }];
+  }
 }
 
 /** 对话框返回的路径未带扩展名时补全 */
 function ensureExtension(filePath: string, kind: ExportDocumentPayload['kind']): string {
-  const ext = kind === 'pdf' ? '.pdf' : '.html';
-  return new RegExp(`\\.${kind}$`, 'i').test(filePath) ? filePath : `${filePath}${ext}`;
+  const ext =
+    kind === 'pdf' ? '.pdf' : kind === 'docx' ? '.docx' : kind === 'png' ? '.png' : '.html';
+  return new RegExp(`\\${ext}$`, 'i').test(filePath) ? filePath : `${filePath}${ext}`;
 }
 
 function showExportDialog(
   win: BrowserWindow | null,
   payload: ExportDocumentPayload
 ): Promise<Electron.SaveDialogReturnValue> {
+  const titleMap: Record<ExportDocumentPayload['kind'], string> = {
+    pdf: '导出为 PDF',
+    html: '导出为 HTML',
+    docx: '导出为 Word 文档',
+    png: '导出为图片（PNG）'
+  };
   const options: Electron.SaveDialogOptions = {
-    title: payload.kind === 'pdf' ? '导出为 PDF' : '导出为 HTML',
+    title: titleMap[payload.kind],
     defaultPath: payload.suggestedName,
     filters: exportFilters(payload.kind)
   };
@@ -103,7 +374,55 @@ async function printHtmlToPdf(html: string, destPath: string): Promise<void> {
   }
 }
 
-/** 注册导出 IPC：弹另存为对话框并完成 HTML 写盘 / PDF 打印 */
+/**
+ * 整页 PNG 截图：隐藏窗口加载导入 HTML，把窗口拉到文档高度后 capturePage。
+ * 长文档超出单屏高度限制时按窗口可支持的最大高度截取（保底不失败）。
+ */
+async function captureHtmlToPng(html: string, destPath: string): Promise<void> {
+  const tempDir = await fsp.mkdtemp(join(app.getPath('temp'), 'typewren-export-'));
+  let shotWin: BrowserWindow | null = null;
+  try {
+    const tempHtml = join(tempDir, 'export.html');
+    await fsp.writeFile(tempHtml, html, 'utf-8');
+    // 图片用白底（不依赖应用主题），避免暗色主题下导出"黑图"
+    shotWin = new BrowserWindow({
+      show: false,
+      width: 1200,
+      height: 800,
+      backgroundColor: '#ffffff',
+      webPreferences: {
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false
+      }
+    });
+    await shotWin.loadFile(tempHtml);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const height = await shotWin.webContents.executeJavaScript(
+      'Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)'
+    );
+    const width = Math.max(
+      1200,
+      await shotWin.webContents.executeJavaScript(
+        'Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0)'
+      )
+    );
+    // 窗口高度上限（Windows 单屏约 16k，留安全边际；超出部分截断）
+    const boundedHeight = Math.min(Math.max(height, 800), 15000);
+    shotWin.setContentSize(width, boundedHeight);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const image = await shotWin.webContents.capturePage();
+    const buffer = image.toPNG();
+    await fsp.writeFile(destPath, buffer);
+  } finally {
+    shotWin?.destroy();
+    await fsp.rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+/** 注册导出 IPC：弹另存为对话框并完成 HTML 写盘 / PDF 打印 / Docx 生成 / PNG 截图 */
 export function registerExportHandlers(): void {
   ipcMain.handle(
     'export:document',
@@ -117,22 +436,41 @@ export function registerExportHandlers(): void {
       const destPath = process.argv.includes('--test')
         ? join(
             app.getPath('temp'),
-            payload.kind === 'pdf' ? 'typewren-export-test.pdf' : 'typewren-export-test.html'
+            payload.kind === 'pdf'
+              ? 'typewren-export-test.pdf'
+              : payload.kind === 'html'
+                ? 'typewren-export-test.html'
+                : payload.kind === 'docx'
+                  ? 'typewren-export-test.docx'
+                  : 'typewren-export-test.png'
           )
         : await pickExportPath(win, payload);
       if (!destPath) return { ok: false, canceled: true };
 
       try {
-        const html = embedKatexFonts(payload.html);
-        if (payload.kind === 'pdf') {
-          await printHtmlToPdf(html, destPath);
+        if (payload.kind === 'docx') {
+          const doc = buildDocxDoc((payload.docxBlocks ?? []) as DocxBlockLike[]);
+          const buffer = await Packer.toBuffer(doc);
+          await fsp.writeFile(destPath, buffer);
         } else {
-          await fsp.writeFile(destPath, html, 'utf-8');
+          const html = embedKatexFonts(payload.html);
+          if (payload.kind === 'pdf') {
+            await printHtmlToPdf(html, destPath);
+          } else if (payload.kind === 'png') {
+            await captureHtmlToPng(html, destPath);
+          } else {
+            await fsp.writeFile(destPath, html, 'utf-8');
+          }
         }
         return { ok: true };
       } catch (error) {
-        const label = payload.kind === 'pdf' ? 'PDF' : 'HTML';
-        dialog.showErrorBox('导出失败', `${label} 导出失败：\n${String(error)}`);
+        const labelMap: Record<ExportDocumentPayload['kind'], string> = {
+          pdf: 'PDF',
+          html: 'HTML',
+          docx: 'Word 文档',
+          png: 'PNG 图片'
+        };
+        dialog.showErrorBox('导出失败', `${labelMap[payload.kind]} 导出失败：\n${String(error)}`);
         return { ok: false, error: String(error) };
       }
     }

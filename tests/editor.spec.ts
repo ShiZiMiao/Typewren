@@ -78,6 +78,124 @@ test.describe('编辑器渲染', () => {
     await expect(app.window.locator('.typewren-math-block .katex')).toHaveCount(1);
   });
 
+  test('Mermaid 图表渲染（```mermaid 代码块转 SVG）', async () => {
+    await loadContent(
+      app,
+      '上方文字\n\n```mermaid\ngraph TD;\n  A[开始] --> B{判断};\n  B -->|是| C[结束];\n```'
+    );
+    const block = app.window.locator('.typewren-mermaid-block');
+    await expect(block).toHaveCount(1);
+    // mermaid 懒加载 + 异步渲染，放宽超时
+    await expect(block.locator('svg')).toHaveCount(1, { timeout: 20000 });
+    // 源码内容保留在 data 属性（序列化往返无损）
+    await expect(block).toHaveAttribute('data-mermaid-value', /graph TD/);
+    // 编辑后源码模式往返仍是 mermaid 块而非高亮代码块
+    await sendCommand(app, 'view:source');
+    await app.window.waitForTimeout(200);
+    await expect(app.window.locator('#source-textarea')).toContainText('```mermaid');
+    await sendCommand(app, 'view:source');
+    await app.window.waitForTimeout(200);
+    await expect(app.window.locator('.typewren-mermaid-block svg')).toHaveCount(1, {
+      timeout: 20000
+    });
+  });
+
+  test('Mermaid 图表源码编辑：选中节点改源码', async () => {
+    await loadContent(app, '```mermaid\ngraph TD;\n  A --> B;\n```');
+    const block = app.window.locator('.typewren-mermaid-block');
+    await expect(block.locator('svg')).toHaveCount(1, { timeout: 20000 });
+    // 点击选中 → 出源码编辑框
+    await block.click();
+    await app.window.waitForTimeout(200);
+    const editor = block.locator('.math-src-editor');
+    await expect(editor).toBeVisible();
+    // 改源码后点其它地方失焦提交
+    await editor.fill('graph LR;\n  X --> Y;');
+    await app.window.locator('.ProseMirror h1, .ProseMirror p').first().click();
+    await app.window.waitForTimeout(800);
+    await expect(block.locator('svg')).toHaveCount(1, { timeout: 20000 });
+  });
+
+  test('脚注渲染与序列化往返（[^id] 引用 + 定义）', async () => {
+    const md = '正文[^1] 继续[^a]\n\n[^1]: 第一条脚注\n[^a]: 第二条脚注\n';
+    await loadContent(app, md);
+    await expect(app.window.locator('sup[data-type="footnote_reference"]')).toHaveCount(2);
+    await expect(app.window.locator('dl[data-type="footnote_definition"]')).toHaveCount(2);
+    // 序列化往返不丢脚注
+    await sendCommand(app, 'view:source');
+    await app.window.waitForTimeout(200);
+    await expect(app.window.locator('#source-textarea')).toContainText('[^1]: 第一条脚注');
+    await sendCommand(app, 'view:source');
+    await app.window.waitForTimeout(200);
+    await expect(app.window.locator('sup[data-type="footnote_reference"]')).toHaveCount(2);
+  });
+
+  test('目录 [TOC] 渲染层级列表并点击跳转', async () => {
+    const md = '[TOC]\n\n# 一级甲\n\n## 二级甲\n\n## 二级乙\n\n### 三级甲\n\n# 一级乙\n';
+    await loadContent(app, md);
+    const toc = app.window.locator('.typewren-toc');
+    await expect(toc).toHaveCount(1);
+    await expect(toc.locator('.toc-item')).toHaveCount(5);
+    // 嵌套层级：二级项应有更深的 ul
+    await expect(toc.locator('.toc-list > ul > li > ul > li > ul')).toHaveCount(1);
+    // 点击跳转：点击"一级乙" → 文档滚动到该标题（标题进入视口）
+    await toc.locator('.toc-item', { hasText: '一级乙' }).click();
+    await app.window.waitForTimeout(400);
+    const visible = await app.window.evaluate(() => {
+      const el = document.querySelector('.ProseMirror h1:last-of-type');
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return r.top >= 0 && r.top < window.innerHeight;
+    });
+    expect(visible).toBe(true);
+  });
+
+  test('块级公式上下限不被容器 overflow 裁切（回归 #katex-display）', async () => {
+    // KaTeX 0.18 用绝对定位（.vlist）绘制积分上下限，墨迹会顶出 .katex 盒子上沿；
+    // 历史上 .katex-display 上的 overflow-x:auto 连带把 overflow-y 计算为 auto，
+    // 把 ∞ 顶部整段裁掉。断言：每个裁切容器（非 visible overflow）的内缘都容得下墨迹。
+    await loadContent(app, '$$\n\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx = \\sqrt{\\pi}\n$$');
+    await expect(app.window.locator('.typewren-math-block .katex')).toHaveCount(1);
+
+    const clipped = await app.window.evaluate(() => {
+      const block = document.querySelector('.typewren-math-block');
+      if (!block) return ['no-block'];
+      // 收集块级公式里真实携带文字的墨迹范围（pstrut/strut 是零宽占位，不算），
+      // 并记住最顶墨迹所属元素——裁切检测要从它向上走
+      const range = document.createRange();
+      let inkTop = Infinity;
+      let inkNode: Node | null = null;
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (!n.textContent || !n.textContent.trim()) continue;
+        range.selectNodeContents(n);
+        const r = range.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) continue;
+        if (r.top < inkTop) {
+          inkTop = r.top;
+          inkNode = n;
+        }
+      }
+      if (!inkNode) return ['no-ink'];
+      // 从墨迹元素逐层向上找裁切容器（overflow 非 visible），比较裁切内缘与墨迹顶。
+      // 注意 .katex-display 位于块内部（墨迹的祖先、块的子孙），必须从墨迹出发
+      const offenders: string[] = [];
+      for (let cur: Element | null = inkNode.parentElement; cur; cur = cur.parentElement) {
+        const cs = getComputedStyle(cur);
+        if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+          const rect = cur.getBoundingClientRect();
+          const cutTop = rect.top + parseFloat(cs.borderTopWidth);
+          if (inkTop < cutTop - 0.5) {
+            const tag = cur.className || cur.tagName;
+            offenders.push(`${tag}: ink ${inkTop.toFixed(1)} < cut ${cutTop.toFixed(1)}`);
+          }
+        }
+      }
+      return offenders;
+    });
+    expect(clipped).toEqual([]);
+  });
+
   test('水平线渲染', async () => {
     await loadContent(app, '上方\n\n---\n\n下方');
     await expect(app.window.locator('.ProseMirror hr')).toHaveCount(1);
@@ -155,8 +273,13 @@ test.describe('数学公式输入', () => {
   test('插入空块级公式并提交 LaTeX', async () => {
     await loadContent(app, '下方文本段落');
     await app.window.locator('.ProseMirror').click();
+    // 等 PM 处理完 click 的选区落位再发命令（无头下组内时序更紧，防止
+    // block:math 抢在选区更新前执行导致插入点错位）
+    await app.window.waitForTimeout(150);
     await sendCommand(app, 'block:math');
 
+    // 无头窗口下节点视图创建可能慢一帧：先等节点出现，再等源码编辑框进入编辑态
+    await expect(app.window.locator('.typewren-math-block')).toHaveCount(1, { timeout: 5000 });
     const editorEl = app.window.locator('.typewren-math-block .math-src-editor');
     await expect(editorEl).toBeVisible({ timeout: 5000 });
     await editorEl.fill('\\frac{1}{2}');

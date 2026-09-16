@@ -2,8 +2,12 @@ import type { Editor } from '@milkdown/kit/core';
 import { editorViewCtx } from '@milkdown/kit/core';
 import { TextSelection } from '@milkdown/kit/prose/state';
 
+import { setSourceCaret, sourceLines, stripMarkup } from './positionSync';
+
 /** 滚动联动阈值：标题行顶距视口顶 8px 内视为“位于顶部” */
 const SCROLL_ACTIVE_THRESHOLD_PX = 8;
+/** 大纲跳转平滑滚动兜底：scrollend 未触发时的最大等待（选段落回时长） */
+const SCROLL_ANIMATION_TIMEOUT_MS = 800;
 
 export interface OutlineEntry {
   level: number;
@@ -42,33 +46,15 @@ function collectHeadings(editor: Editor): (OutlineEntry & { pos: number })[] {
   return entries;
 }
 
-/** 剥离行内 Markdown 标记（链接壳 / 转义 / 强调符），与 PM textContent 对齐 */
-function stripInlineMarks(line: string): string {
-  return line
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\\([\\`*_[\]{}~#])/g, '$1')
-    .replace(/[*_`~]/g, '')
-    .trim();
-}
+/**
+ * 标题行匹配用的文本剥离：与 positionSync.stripMarkup 同一份共享实现
+ * （详见其文档注释：只删成对语法符、保留词内下划线）。
+ */
 
 /** ATX 标题行：^ {0,3}#{1,6} 后跟空白 */
 const ATX_RE = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/;
 /** Setext 下划线行（= → h1，- → h2） */
 const SETEXT_RE = /^ {0,3}(=+|-+)\s*$/;
-
-/** 源码行拆分（记录每行的起始偏移，供光标定位） */
-function sourceLines(text: string): { start: number; content: string }[] {
-  const lines: { start: number; content: string }[] = [];
-  let start = 0;
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '\n') {
-      lines.push({ start, content: text.slice(start, i) });
-      start = i + 1;
-    }
-  }
-  lines.push({ start, content: text.slice(start) });
-  return lines;
-}
 
 /** 从 fromLine 起匹配单个标题（level + 文本），返回行号与光标落点 */
 function matchHeadingInLines(
@@ -80,7 +66,7 @@ function matchHeadingInLines(
   for (let i = fromLine; i < lines.length; i++) {
     // ATX：# 120
     const atx = ATX_RE.exec(lines[i].content);
-    if (atx && atx[1].length === level && stripInlineMarks(atx[2] ?? '') === headingText) {
+    if (atx && atx[1].length === level && stripMarkup(atx[2] ?? '') === headingText) {
       const content = atx[2] ?? '';
       const caret = lines[i].start + atx[0].length - content.length;
       return { line: i, caret };
@@ -91,7 +77,7 @@ function matchHeadingInLines(
     if (underline) {
       const isH1 = underline[1][0] === '=';
       if ((isH1 && level === 1) || (!isH1 && level === 2)) {
-        if (stripInlineMarks(lines[i].content) === headingText) {
+        if (stripMarkup(lines[i].content) === headingText) {
           return { line: i, caret: lines[i].start };
         }
       }
@@ -127,52 +113,52 @@ function findSourceHeadingCaret(
 }
 
 /**
- * 源码模式跳转：定位光标到目标标题源码行并滚动到可见。
- * 与渲染模式一致：标题行对齐视口顶部。返回是否成功落点（失败时调用方保持原状）。
+ * 源码模式跳转：先滚动标题行到视口顶部、滚动完成后定位光标。
+ * 与渲染模式完全同序（先滚后设光标）避免"闪一下再移动"；
+ * onDone 在滚动结束（或已到位）后回调——由调用方解锁高亮。
+ * 返回是否成功落点（失败时调用方保持原状）。
  */
-function jumpInSource(el: HTMLElement, entries: OutlineEntry[], index: number): boolean {
+function jumpInSource(
+  el: HTMLElement,
+  entries: OutlineEntry[],
+  index: number,
+  onDone?: () => void
+): boolean {
   const text = el.textContent ?? '';
   const caret = findSourceHeadingCaret(text, entries, index);
   if (caret === null) return false;
 
-  // 定位光标所在文本节点（contenteditable 内可能被拆成多个文本节点）
-  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-  let acc = 0;
-  let startNode: Text | null = null;
-  let startOffset = 0;
-  while (walker.nextNode()) {
-    const node = walker.currentNode as Text;
-    if (caret <= acc + node.data.length) {
-      startNode = node;
-      startOffset = Math.min(caret - acc, node.data.length);
-      break;
-    }
-    acc += node.data.length;
-  }
-  if (!startNode) return false;
+  // 先设光标（用于计算滚动目标），再滚动到目标；滚动完重新确认光标位置
+  if (!setSourceCaret(el, caret)) return false;
 
   const selection = window.getSelection();
-  if (!selection) return false;
-
-  const range = document.createRange();
-  range.setStart(startNode, startOffset);
-  range.collapse(true);
-
-  // 焦点放回源码区后再设选区（contenteditable focus 可能清空选区）
-  selection.removeAllRanges();
-  selection.addRange(range);
-  if (document.activeElement !== el) {
-    el.focus();
-    selection.removeAllRanges();
-    selection.addRange(range);
-  }
-
-  // 标题行对齐视口顶部（与渲染模式 jumpTo 的定位一致）
-  const rect = range.getBoundingClientRect();
+  const rect =
+    selection && selection.rangeCount > 0 ? selection.getRangeAt(0).getBoundingClientRect() : null;
   const containerRect = el.getBoundingClientRect();
-  if (containerRect.height > 0) {
-    const target = el.scrollTop + (rect.top - containerRect.top);
-    el.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+  const scrollTarget =
+    rect && containerRect.height > 0 && rect.height > 0
+      ? Math.max(0, el.scrollTop + (rect.top - containerRect.top))
+      : -1;
+
+  // 标题行对齐视口顶部 + 平滑滚动（与渲染模式 jumpTo 行为一致）
+  const finish = (): void => {
+    // 滚动结束后重新精确落光标（滚动不改变偏移，覆盖偶发布局变化）
+    setSourceCaret(el, caret);
+    onDone?.();
+  };
+
+  if (scrollTarget >= 0 && el.scrollTop !== scrollTarget) {
+    let finished = false;
+    const done = (): void => {
+      if (finished) return;
+      finished = true;
+      finish();
+    };
+    el.addEventListener('scrollend', done, { once: true });
+    window.setTimeout(done, SCROLL_ANIMATION_TIMEOUT_MS);
+    el.scrollTo({ top: scrollTarget, behavior: 'smooth' });
+  } else {
+    finish();
   }
   return true;
 }
@@ -320,28 +306,33 @@ export function createOutlinePanel(
       const target = entries[index];
       if (!target) return;
 
-      // 源码模式：在源码文本中定位标题行（保持停留在源码模式）
+      // 源码模式：与渲染模式一致的"平滑滚动 + 锁高亮 + 结束后落光标"
       const sourceEl = deps.sourceEl();
       if (deps.isSourceMode() && sourceEl) {
-        if (jumpInSource(sourceEl, entries, index)) {
-          controller.setActive(index);
+        controller.setActive(index);
+        jumpLocked = true;
+        if (
+          !jumpInSource(sourceEl, entries, index, () => {
+            controller.setActive(index);
+            jumpLocked = false;
+          })
+        ) {
+          jumpLocked = false;
+          return;
         }
         return;
       }
 
-      let scrollTarget = 0;
-      let container: HTMLElement | null = null;
-      let pmDom: HTMLElement | null = null;
-
+      // 渲染模式：先平滑滚动、滚动完成后再设置选区。
+      // 顺序是本功能成败关键：若先 dispatch 选区，浏览器会立刻把光标
+      // 滚入视口（瞬移一下），随后 smooth 再滚一遍（移动）——两段叠加
+      // 就是"闪一下再移动"的抽动；先滚后选则只有一次平滑动画。
+      // 高亮在滚动期间锁定（jumpLocked），结束后一次 setActive，
+      // 避免滚过中间标题时高亮闪烁。
+      const container = document.querySelector('#editor-container') as HTMLElement;
+      let scrollTarget = -1;
       editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
-        const $pos = view.state.doc.resolve(target.pos + 1);
-        const selection = TextSelection.near($pos, 1);
-        view.dispatch(view.state.tr.setSelection(selection));
-
-        container = document.querySelector('#editor-container') as HTMLElement;
-        pmDom = view.dom;
-
         // 直接按 heading 层级从 DOM 里找对应标题（比 domAtPos 更可靠）
         const allHeadings = view.dom.querySelectorAll('h1, h2, h3, h4, h5, h6');
         const headingEl = allHeadings[index] as HTMLElement | undefined;
@@ -352,20 +343,47 @@ export function createOutlinePanel(
         }
       });
 
-      setTimeout(() => {
-        if (scrollTarget > 0 && container) {
-          container.scrollTo({ top: scrollTarget, behavior: 'smooth' });
-        }
-        // 把焦点还给编辑器，preventScroll 阻止浏览器原生 focus-scroll 撤销滚动
-        pmDom?.focus({ preventScroll: true });
+      const finishJump = (): void => {
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const $pos = view.state.doc.resolve(target.pos + 1);
+          const selection = TextSelection.near($pos, 1);
+          view.dispatch(view.state.tr.setSelection(selection));
+          // 目标已在视口内：焦点还给编辑器（preventScroll 防原生 focus 滚动）
+          view.dom.focus({ preventScroll: true });
+        });
         controller.setActive(index);
-      }, 0);
+        jumpLocked = false;
+      };
+
+      // 先置高亮：点击瞬间反馈（即便锁定期间也不需等滚动完才亮）
+      controller.setActive(index);
+      jumpLocked = true;
+      if (container && scrollTarget >= 0 && container.scrollTop !== scrollTarget) {
+        // scrollend 事件（Chromium 支持）或超时兜底后落光标 + 解锁
+        let finished = false;
+        const finish = (): void => {
+          if (finished) return;
+          finished = true;
+          finishJump();
+        };
+        container.addEventListener('scrollend', finish, { once: true });
+        window.setTimeout(finish, SCROLL_ANIMATION_TIMEOUT_MS);
+        container.scrollTo({ top: scrollTarget, behavior: 'smooth' });
+      } else {
+        finishJump();
+      }
     }
   };
 
-  // 滚动联动：视口顶部附近的标题决定 outline active（rAF 合并每帧多次 scroll）
+  // 滚动联动：视口顶部附近的标题决定 outline active（rAF 合并每帧多次 scroll）。
+  // 跳转期间必须锁定：平滑滚动的过程会滚过一串中间标题，不及时加锁，
+  // updateActiveFromScroll 会把高亮反复改到"正在经过"的标题上——
+  // 用户看到的就是"当前高亮消失一下，滚到位后再次出现"。
   let scrollPending = false;
+  let jumpLocked = false;
   const onScroll = (): void => {
+    if (jumpLocked) return;
     if (scrollPending) return;
     scrollPending = true;
     requestAnimationFrame(() => {

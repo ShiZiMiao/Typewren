@@ -16,6 +16,14 @@ import { getMarkdown, setMarkdown } from '../editor/actions';
  *   比整篇序列化成字符串再比较更快，且“撤销到打开时状态”自然回干净。
  * ============================================================ */
 
+/** 脏文档草稿自动落盘间隔 */
+const DRAFT_AUTOSAVE_MS = 30_000;
+
+/** 文档是否引用了同目录 assets/ 下的附件（另存为迁移提示用） */
+function refsLocalAssets(markdown: string): boolean {
+  return /(?:\]\(|src=["'])(?:\.\/)?assets\//i.test(markdown);
+}
+
 export class FileService {
   /** 当前文件绝对路径；null 表示未命名文档 */
   private filePath: string | null = null;
@@ -32,6 +40,12 @@ export class FileService {
   /** 程序化替换内容期间抑制脏标记 */
   private suppressDirty = false;
 
+  /** 上一次草稿落盘使用的键（当前路径；null 表示从未同步过） */
+  private lastDraftKey: string | null = null;
+
+  /** 用户已选择放弃更改关闭：不再写草稿，beforeunload 静默跳过 */
+  private abandonedForClose = false;
+
   /** 标题同步节流计时器（输入高频时避免每键 3 次 IPC + DOM 写） */
   private titleTimer: number | undefined;
 
@@ -47,10 +61,60 @@ export class FileService {
   /** 标题变化回调（供自绘标题栏同步显示） */
   onTitleChange: ((title: string) => void) | null = null;
 
+  /** 文档路径变化回调（文件树刷新等；loadContent / saveAs 成功后触发） */
+  onPathChanged: (() => void) | null = null;
+
   constructor(
     private readonly api: TypewrenApi,
     private readonly editor: Editor
-  ) {}
+  ) {
+    // 测试模式不碰用户数据目录（草稿/恢复整体静默）
+    if (!api.testMode) {
+      const intervalMs = Number(api.draftIntervalMs) || DRAFT_AUTOSAVE_MS;
+      window.setInterval(() => this.syncDraft(), intervalMs);
+      // 正常/意外关闭前都尽力把状态同步到草稿存储
+      window.addEventListener('beforeunload', () => this.syncDraft());
+    }
+  }
+
+  /* ---------- 崩溃恢复草稿 ---------- */
+
+  /**
+   * 把草稿状态与当前文档对齐：脏 → 落盘快照；干净/路径变化 → 清理。
+   * 尽力而为（send 无回执），失败不影响编辑。
+   * 启动时的崩溃草稿由主进程在创建窗口前统一消费，渲染层无需等待领取。
+   */
+  private syncDraft(): void {
+    if (this.abandonedForClose) return;
+    const key = this.filePath ?? '';
+    if (this.lastDraftKey !== null && this.lastDraftKey !== key) {
+      this.api.clearDraft(this.lastDraftKey);
+    }
+    this.lastDraftKey = key;
+    if (this.isDirty) {
+      this.api.saveDraft({ path: key, content: this.currentMarkdown });
+    } else {
+      this.api.clearDraft(key);
+    }
+  }
+
+  /** 关闭保护中选择"不保存"：清掉草稿并请求主进程真正关闭窗口 */
+  abandonForClose(): void {
+    this.abandonedForClose = true;
+    if (!this.api.testMode) this.api.clearDraft(this.filePath ?? '');
+    this.api.requestForceClose();
+  }
+
+  /**
+   * 崩溃恢复：以磁盘内容（不存在则空）为基线加载草稿，使文档呈"未保存修改"状态，
+   * 用户确认后再 Ctrl+S 写回磁盘。
+   */
+  async restoreDraft(path: string, content: string): Promise<void> {
+    const disk = path ? ((await this.api.readFileQuiet(path)) ?? '') : '';
+    await this.loadContent(path || null, disk);
+    setMarkdown(this.editor, content);
+    this.refreshTitle();
+  }
 
   get currentMarkdown(): string {
     return this.sourceAccessor ? this.sourceAccessor() : getMarkdown(this.editor);
@@ -97,6 +161,7 @@ export class FileService {
       const dirtyMark = this.isDirty ? '● ' : '';
       this.api.setTitle(`${dirtyMark}${this.fileName} — Typewren`);
       this.api.setDirty(this.isDirty);
+      this.api.setWindowPath(this.filePath);
       this.onTitleChange?.(`${dirtyMark}${this.fileName}`);
     }, 80);
   }
@@ -108,6 +173,8 @@ export class FileService {
     // parse(markdown) 存在细微结构差异，重新解析会假阳性置脏。
     this.baselineDoc = this.currentDoc();
     this.refreshTitle();
+    // 基线刚建立（打开/保存/新建），草稿状态应与之对齐（干净即清理）
+    if (!this.api.testMode) this.syncDraft();
   }
 
   private currentDoc(): ProseNode | null {
@@ -121,13 +188,15 @@ export class FileService {
   private async loadContent(path: string | null, content: string): Promise<void> {
     this.filePath = path;
     this.originalMarkdown = content;
+    this.onPathChanged?.();
     const savedAccessor = this.sourceAccessor;
     this.sourceAccessor = null;
     this.suppressDirty = true;
     try {
       setMarkdown(this.editor, content);
       // replaceAll 是异步事务，等待一帧让 markdownUpdated 触发完毕
-      await new Promise((resolve) => requestAnimationFrame(resolve));
+      // （setTimeout 而非 rAF：无头/后台窗口 rAF 可能被节流）
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
     } finally {
       this.suppressDirty = false;
       // 恢复访问器并让源码视图同步新文档内容
@@ -175,13 +244,35 @@ export class FileService {
     await this.loadContent(null, '');
   }
 
+  /** 当前窗口是否"空文档"（无路径且未修改）——决定就地在当前窗口打开还是新窗口 */
+  private get isEmptyDocument(): boolean {
+    return this.filePath === null && !this.isDirty;
+  }
+
   async openFile(): Promise<void> {
     if (!(await this.confirmBeforeDiscard())) return;
 
     const result = await this.api.openFileDialog();
     if (!result) return;
 
-    await this.loadContent(result.path, result.content);
+    if (this.isEmptyDocument) {
+      await this.loadContent(result.path, result.content);
+    } else {
+      window.typewren.openFileInNewWindow(result.path);
+    }
+  }
+
+  /**
+   * 打开指定路径（最近文件菜单 / 外部请求共用）：
+   * 与「文件→打开…」同逻辑——当前窗口空文档则就地打开，否则新窗口打开。
+   */
+  async openSmart(path: string): Promise<void> {
+    if (this.isEmptyDocument) {
+      const result = await this.api.readFileContent(path);
+      if (result) await this.loadContentFromPath(result.path, result.content);
+    } else {
+      window.typewren.openFileInNewWindow(path);
+    }
   }
 
   /** 从指定路径加载文件内容（供文件关联打开使用） */
@@ -192,6 +283,24 @@ export class FileService {
   /** 保存。返回 true 表示磁盘内容与当前一致（含另存为成功） */
   async save(): Promise<boolean> {
     if (!this.filePath) return await this.saveAs();
+
+    // 外部修改冲突检测：磁盘内容与"上次读写的基线"不一致说明被其它程序改过，
+    // 直接写会静默覆盖对方的修改
+    const disk = await this.api.readFileQuiet(this.filePath);
+    if (disk !== null && disk !== this.savedMarkdown) {
+      const choice = await this.api.confirmDialog({
+        message: '文件已被其它程序修改',
+        detail:
+          '「覆盖保存」将丢失外部更改；「重新载入磁盘版本」将丢弃你当前的编辑内容（此操作不可撤销）。',
+        buttons: ['覆盖保存', '重新载入磁盘版本', '取消'],
+        cancelId: 2
+      });
+      if (choice === null || choice === 2) return false;
+      if (choice === 1) {
+        await this.loadContent(this.filePath, disk);
+        return true;
+      }
+    }
 
     const content = this.currentMarkdown;
     const ok = await this.api.writeFile({ path: this.filePath, content });
@@ -204,6 +313,7 @@ export class FileService {
 
   async saveAs(): Promise<boolean> {
     const content = this.currentMarkdown;
+    const previousPath = this.filePath;
     const suggestedName = this.filePath ? this.fileName : '未命名.md';
 
     const result = await this.api.saveFileDialog({
@@ -214,7 +324,32 @@ export class FileService {
 
     this.filePath = result.path;
     this.originalMarkdown = content;
+    this.onPathChanged?.();
     this.snapshot(content);
+
+    // 另存为到新位置且文档引用 ./assets/：附件留在原地会断链，提示迁移
+    if (
+      !this.api.testMode &&
+      previousPath &&
+      previousPath !== result.path &&
+      refsLocalAssets(content)
+    ) {
+      const choice = await this.api.confirmDialog({
+        message: '是否同时复制附件文件夹（assets）到新位置？',
+        detail: '不复制的话，文档中引用 ./assets/ 的图片在新位置可能无法显示。',
+        buttons: ['复制', '不复制'],
+        cancelId: 1
+      });
+      if (choice === 0) {
+        const copy = await this.api.copyAssets({ fromDoc: previousPath, toDoc: result.path });
+        if (!copy.ok) {
+          await this.api.confirmDialog({
+            message: `附件复制失败：${copy.error ?? '未知错误'}`,
+            buttons: ['知道了']
+          });
+        }
+      }
+    }
     return true;
   }
 

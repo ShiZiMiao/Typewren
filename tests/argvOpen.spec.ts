@@ -1,11 +1,12 @@
 import { test, expect, _electron as electron } from '@playwright/test';
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OUT_MAIN, launchApp } from './helpers';
 
 /* ============================================================
- * 启动参数与单实例（index.ts extractMarkdownPath / second-instance）
+ * 启动参数与多窗口（index.ts extractMarkdownPath / second-instance /
+ * file:open-in-new-window / file:take-pending-open 拉取链路）
  * ============================================================ */
 
 const WORK_DIR = join(tmpdir(), 'typewren-argv-test');
@@ -22,52 +23,66 @@ test.beforeAll(() => {
   mkdirSync(WORK_DIR, { recursive: true });
 });
 
+/** 等新窗口完成渲染并断言其一级标题 */
+async function expectHeadingInWindow(
+  window: Awaited<ReturnType<typeof launchApp>>['window'],
+  heading: string
+): Promise<void> {
+  await window.waitForSelector('.ProseMirror', { timeout: 15000 });
+  await expect(window.locator('.ProseMirror h1')).toHaveText(heading, { timeout: 10000 });
+}
+
 test('命令行参数打开 Markdown 文件', async () => {
   createDoc(DOC_A, '命令行打开的文档');
   const app = await electron.launch({ args: ['--test', OUT_MAIN, DOC_A] });
   const window = await app.firstWindow();
   try {
-    await window.waitForLoadState('domcontentloaded');
-    await window.waitForSelector('.ProseMirror', { timeout: 15000 });
-    await expect(window.locator('.ProseMirror h1')).toHaveText('命令行打开的文档', {
-      timeout: 10000
-    });
+    await expectHeadingInWindow(window, '命令行打开的文档');
   } finally {
     await app.close().catch(() => {});
   }
 });
 
-test('二次启动实例把文件交给首实例（second-instance 接线）', async () => {
-  createDoc(DOC_A, '首实例文档');
+test('二次启动实例把文件交给首实例：新开窗口打开（second-instance 接线）', async () => {
   const first = await launchApp();
   try {
-    await first.app.evaluate(
-      ({ BrowserWindow }, p) => {
-        BrowserWindow.getAllWindows()[0].webContents.send('cmd', 'open-file-path', p);
-      },
-      {
-        path: DOC_A,
-        content: readFileSync(DOC_A, 'utf-8')
-      }
-    );
-    await expect(first.window.locator('.ProseMirror h1')).toHaveText('首实例文档', {
-      timeout: 5000
-    });
-
     // 真实二次启动会因单实例锁立即退出（Playwright 视为异常），
     // 这里在主进程内人工派发 second-instance 事件验证处理链路由。
     createDoc(DOC_B, '二次启动传递的文档');
-    await first.app.evaluate(
-      ({ app }, argv) => {
-        app.emit('second-instance', {} as Electron.Event, argv);
-      },
-      [process.execPath, '--test', OUT_MAIN, DOC_B]
-    );
+    const [secondWin] = await Promise.all([
+      first.app.waitForEvent('window'),
+      first.app.evaluate(
+        ({ app }, argv) => {
+          app.emit('second-instance', {} as Electron.Event, argv);
+        },
+        [process.execPath, '--test', OUT_MAIN, DOC_B]
+      )
+    ]);
 
-    // 首实例应聚焦并加载第二份文档
-    await expect(first.window.locator('.ProseMirror h1')).toHaveText('二次启动传递的文档', {
-      timeout: 15000
-    });
+    // 文件总是在新窗口打开，首窗口不受影响
+    await expectHeadingInWindow(secondWin, '二次启动传递的文档');
+    await expect(first.window.locator('.ProseMirror')).toBeVisible();
+    expect(
+      await first.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+    ).toBe(2);
+  } finally {
+    await first.app.close().catch(() => {});
+  }
+});
+
+test('file:open-in-new-window 通道：渲染进程就绪后经 take-pending-open 拉取文件', async () => {
+  const first = await launchApp();
+  try {
+    createDoc(DOC_B, '新窗口打开的文档');
+    const [secondWin] = await Promise.all([
+      first.app.waitForEvent('window'),
+      first.window.evaluate((p: string) => {
+        const api = (window as unknown as { typewren: { openFileInNewWindow(path: string): void } })
+          .typewren;
+        api.openFileInNewWindow(p);
+      }, DOC_B)
+    ]);
+    await expectHeadingInWindow(secondWin, '新窗口打开的文档');
   } finally {
     await first.app.close().catch(() => {});
   }

@@ -5,7 +5,11 @@
  * ============================================================ */
 
 import type {
+  AssetsCopyPayload,
+  AssetsCopyResult,
   CommandName,
+  ConfirmDialogPayload,
+  DirEntry,
   ExportDocumentPayload,
   ExportDocumentResult,
   FileContentPayload,
@@ -13,13 +17,22 @@ import type {
   ImageSaveFromDataPayload,
   ImageSaveFromPathPayload,
   ImageSaveResult,
+  ListDirPayload,
   OpenFileResult,
+  PendingOpenResult,
   SaveAsPayload,
-  SaveAsResult
+  SaveAsResult,
+  UpdateDownloadState
 } from './ipc';
 
 export interface TypewrenApi {
   readonly platform: NodeJS.Platform;
+
+  /** --test 模式标记（关闭草稿/恢复等会写用户数据目录的副作用） */
+  readonly testMode: boolean;
+
+  /** 草稿自动落盘间隔毫秒（env TYPEWREN_DRAFT_INTERVAL_MS 覆盖，测试用；空串=默认） */
+  readonly draftIntervalMs: string;
 
   /** 弹出原生打开对话框，读取文件内容；取消或失败返回 null */
   openFileDialog(): Promise<OpenFileResult | null>;
@@ -45,6 +58,27 @@ export interface TypewrenApi {
   /** 未保存时新建/打开前的确认，返回用户选择 */
   confirmDiscardChanges(): Promise<'save' | 'discard' | 'cancel'>;
 
+  /** 通用原生确认框（外部修改冲突 / 附件迁移等），返回按钮下标；参数非法返回 null */
+  confirmDialog(payload: ConfirmDialogPayload): Promise<number | null>;
+
+  /** 静默读取 Markdown 文件内容（外部修改检测用）；不存在/不可读返回 null，不弹框 */
+  readFileQuiet(filePath: string): Promise<string | null>;
+
+  /** 列出文档目录（或其后代子目录）的 Markdown 文件与子目录（文件树面板） */
+  listDir(payload: ListDirPayload): Promise<DirEntry[]>;
+
+  /** 在系统资源管理器中定位文件 */
+  showInFolder(filePath: string): void;
+
+  /** 切换拼写检查（主进程 session 级生效） */
+  setSpellcheck(enabled: boolean): void;
+
+  /** 订阅拼写检查状态广播；返回取消订阅函数 */
+  onSpellcheckState(callback: (enabled: boolean) => void): () => void;
+
+  /** 另存为后把源文档同目录 assets 的图片复制到新位置（已存在的跳过） */
+  copyAssets(payload: AssetsCopyPayload): Promise<AssetsCopyResult>;
+
   /** 更新窗口标题 */
   setTitle(title: string): void;
 
@@ -60,6 +94,18 @@ export interface TypewrenApi {
   /** 同步脏状态到主进程（关闭保护用） */
   setDirty(dirty: boolean): void;
 
+  /** 同步当前文档路径到主进程（会话恢复 / 最近文件 / 重复打开检测的数据源） */
+  setWindowPath(path: string | null): void;
+
+  /**
+   * 订阅更新下载状态（开始 / 进度 / 完成 / 取消 / 失败）。
+   * 返回取消订阅函数。
+   */
+  onUpdateDownloadState(callback: (state: UpdateDownloadState) => void): () => void;
+
+  /** 取消正在进行的更新下载（未在下载时无效果） */
+  cancelUpdateDownload(): void;
+
   /** 渲染进程完成保存后请求真正关闭窗口 */
   requestForceClose(): void;
 
@@ -74,6 +120,19 @@ export interface TypewrenApi {
 
   /** 在新窗口中打开指定文件 */
   openFileInNewWindow(filePath: string): void;
+
+  /**
+   * 拉取主进程为本窗口登记的“待打开”文件（文件关联/二次启动/新窗口打开/
+   * 崩溃恢复/会话恢复场景），取后即删；无待打开文件返回 null。
+   * restore=true 时为崩溃恢复草稿，加载后须置脏。
+   */
+  takePendingOpen(): Promise<PendingOpenResult | null>;
+
+  /** 写入/更新本窗口路径对应的崩溃恢复草稿（尽力而为，无回执） */
+  saveDraft(payload: { path: string; content: string }): void;
+
+  /** 清除指定路径的崩溃恢复草稿 */
+  clearDraft(path: string): void;
 
   /** 获取文件的绝对路径（用于拖拽文件） */
   getPathForFile(file: File): string;

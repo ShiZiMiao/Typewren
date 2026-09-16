@@ -1,5 +1,5 @@
 import { test, expect, _electron as electron } from '@playwright/test';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -14,14 +14,24 @@ import {
 /* ============================================================
  * 关闭保护（attachCloseGuard）
  * 注意：--test 模式会跳过关闭保护，故这里启动**不带** --test 的真实实例，
- * 通过主进程打桩 showMessageBoxSync 模拟用户三选一。
+ * 通过主进程打桩 showMessageBox（异步）模拟用户三选一。
+ * 每个用例用独立的 --user-data-dir 隔离（关闭保护跑真实实例时，
+ * 草稿/恢复等副作用会写 userData，绝不能污染开发机的真实数据）。
  * ============================================================ */
 
-const WORK_DIR = join(tmpdir(), 'typewren-close-test');
+// 每次运行用独立工作目录：上一轮被强杀的 Electron 进程可能还锁着旧目录，
+// Windows 上 rmSync 会 EPERM（临时目录残留无害）
+const RUN_ID = `${process.pid}-${Date.now()}`;
+const WORK_DIR = join(tmpdir(), `typewren-close-test-${RUN_ID}`);
 const SAVE_PATH = join(WORK_DIR, 'guard.md');
 
+let launchSeq = 0;
+
 async function launchPlain(): Promise<AppHandle> {
-  const app = await electron.launch({ args: [OUT_MAIN] });
+  const dataDir = join(WORK_DIR, `ud-${launchSeq++}`);
+  const app = await electron.launch({
+    args: [OUT_MAIN, '--headless', `--user-data-dir=${dataDir}`]
+  });
   const window = await app.firstWindow();
   await window.waitForLoadState('domcontentloaded');
   await window.waitForSelector('.ProseMirror', { timeout: 15000 });
@@ -49,7 +59,6 @@ function forceDestroy(handle: AppHandle): Promise<void> {
 
 test.describe('关闭保护', () => {
   test.beforeAll(() => {
-    if (existsSync(WORK_DIR)) rmSync(WORK_DIR, { recursive: true, force: true });
     mkdirSync(WORK_DIR, { recursive: true });
   });
 

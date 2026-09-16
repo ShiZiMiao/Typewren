@@ -8,6 +8,8 @@ let window: Awaited<ReturnType<typeof electronApp.firstWindow>>;
 
 const HTML_OUT = join(tmpdir(), 'typewren-export-test.html');
 const PDF_OUT = join(tmpdir(), 'typewren-export-test.pdf');
+const DOCX_OUT = join(tmpdir(), 'typewren-export-test.docx');
+const PNG_OUT = join(tmpdir(), 'typewren-export-test.png');
 
 /** 覆盖标题/公式/表格/任务列表/代码块/引用的样例文档 */
 const SAMPLE_MD = `# 导出测试
@@ -57,7 +59,7 @@ function loadSampleDocument(): Promise<void> {
 }
 
 /** 经由主进程菜单命令触发导出（--test 模式直写临时目录，无系统对话框） */
-function triggerExport(kind: 'html' | 'pdf'): Promise<void> {
+function triggerExport(kind: 'html' | 'pdf' | 'docx' | 'png'): Promise<void> {
   return electronApp.evaluate(({ BrowserWindow }, command) => {
     BrowserWindow.getAllWindows()[0].webContents.send('cmd', command);
   }, `export:${kind}`);
@@ -117,6 +119,50 @@ test.describe('导出', () => {
         try {
           const buf = readFileSync(PDF_OUT);
           return buf.length > 1024 && buf.slice(0, 5).toString() === '%PDF-';
+        } catch {
+          return false;
+        }
+      })
+      .toBe(true);
+  });
+
+  test('导出 docx 生成有效 Word 文件', async () => {
+    await loadSampleDocument();
+    await window.waitForSelector('.ProseMirror h1', { timeout: 5000 });
+    try {
+      rmSync(DOCX_OUT);
+    } catch {
+      // 文件不存在则忽略
+    }
+    await triggerExport('docx');
+
+    await expect
+      .poll(() => {
+        try {
+          const buf = readFileSync(DOCX_OUT);
+          return buf.length > 512 && buf.slice(0, 2).toString('latin1') === 'PK';
+        } catch {
+          return false;
+        }
+      })
+      .toBe(true);
+  });
+
+  test('导出 PNG 生成有效图片文件', async () => {
+    await loadSampleDocument();
+    await window.waitForSelector('.ProseMirror h1', { timeout: 5000 });
+    try {
+      rmSync(PNG_OUT);
+    } catch {
+      // 文件不存在则忽略
+    }
+    await triggerExport('png');
+
+    await expect
+      .poll(() => {
+        try {
+          const buf = readFileSync(PNG_OUT);
+          return buf.length > 1000 && buf.slice(0, 4).toString('latin1') === '\u0089PNG';
         } catch {
           return false;
         }

@@ -1,10 +1,26 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
-import type { CommandName } from '../shared/ipc';
+import { isUpdateDownloadState, type CommandName } from '../shared/ipc';
 import type { TypewrenApi } from '../shared/typewren-api';
+
+declare const location: { search: string };
+
+// 启动标志由主进程经页面 URL query 传入（window.ts）：
+// 沙箱 preload 里 process.argv/env 不可靠，URL 参数两端一致性最好
+function readLaunchParam(name: string): string | null {
+  try {
+    return new URLSearchParams(location.search).get(name);
+  } catch {
+    return null;
+  }
+}
 
 const api: TypewrenApi = {
   platform: process.platform,
+
+  testMode: readLaunchParam('twtest') === '1',
+
+  draftIntervalMs: readLaunchParam('draft') ?? '',
 
   openFileDialog: () => ipcRenderer.invoke('dialog:open-file'),
 
@@ -22,6 +38,25 @@ const api: TypewrenApi = {
 
   confirmDiscardChanges: () => ipcRenderer.invoke('dialog:discard-changes'),
 
+  confirmDialog: (payload) => ipcRenderer.invoke('dialog:confirm', payload),
+
+  readFileQuiet: (filePath) => ipcRenderer.invoke('file:read-quiet', filePath),
+
+  listDir: (payload) => ipcRenderer.invoke('dir:list', payload),
+
+  showInFolder: (filePath) => ipcRenderer.send('file:show-in-folder', filePath),
+
+  setSpellcheck: (enabled) => ipcRenderer.send('app:set-spellcheck', enabled),
+
+  onSpellcheckState: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, enabled: boolean): void =>
+      callback(enabled);
+    ipcRenderer.on('spellcheck:state', handler);
+    return () => ipcRenderer.off('spellcheck:state', handler);
+  },
+
+  copyAssets: (payload) => ipcRenderer.invoke('assets:copy', payload),
+
   setTitle: (title) => ipcRenderer.send('win:set-title', title),
 
   setNativeTheme: (theme) => ipcRenderer.send('theme:set-native', theme),
@@ -33,6 +68,18 @@ const api: TypewrenApi = {
   },
 
   setDirty: (dirty) => ipcRenderer.send('win:set-dirty', dirty),
+
+  setWindowPath: (path) => ipcRenderer.send('win:set-path', path),
+
+  onUpdateDownloadState: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: unknown): void => {
+      if (isUpdateDownloadState(state)) callback(state);
+    };
+    ipcRenderer.on('updater:download-state', handler);
+    return () => ipcRenderer.off('updater:download-state', handler);
+  },
+
+  cancelUpdateDownload: () => ipcRenderer.send('updater:cancel-download'),
 
   requestForceClose: () => ipcRenderer.send('win:request-force-close'),
 
@@ -46,6 +93,12 @@ const api: TypewrenApi = {
   },
 
   openFileInNewWindow: (filePath) => ipcRenderer.send('file:open-in-new-window', filePath),
+
+  takePendingOpen: () => ipcRenderer.invoke('file:take-pending-open'),
+
+  saveDraft: (payload) => ipcRenderer.send('draft:save', payload),
+
+  clearDraft: (path) => ipcRenderer.send('draft:clear', path),
 
   getPathForFile: (file) => webUtils.getPathForFile(file),
 

@@ -18,6 +18,7 @@ import { $prose, $view } from '@milkdown/kit/utils';
 
 import { highlight, configureCodeHighlight } from './highlight';
 import { applyStrikethroughFixes } from './strikethroughFix';
+import { tabKeyPlugin } from './tabKey';
 import {
   blockMathEmptyInputRule,
   blockMathFullInputRule,
@@ -28,8 +29,35 @@ import {
   mathInlineView,
   remarkMathPlugin
 } from './math';
+import {
+  mermaidBlockSchema,
+  mermaidBlockView,
+  mermaidInputConvert,
+  remarkMermaidPlugin
+} from './mermaid';
+import { remarkTocPlugin, tocRefreshPlugin, tocSchema, tocView } from './toc';
 import { tableTools } from './tableTools';
 import { taskListToggle } from './taskToggle';
+import { writingPlugin, WritingModes, type WritingModesLike } from '../ui/writingModes';
+
+/** 写作模式实例的晚绑定槽（createEditor 之后由主装配设置） */
+let writingModesSlot: WritingModes | null = null;
+
+export function bindWritingModes(modes: WritingModes): void {
+  writingModesSlot = modes;
+}
+
+/** 装配期间的空实现（插件 update 先于 bind 触发时不会崩） */
+class NullModes implements WritingModesLike {
+  get isFocus(): boolean {
+    return false;
+  }
+  get isTypewriter(): boolean {
+    return false;
+  }
+  scrollToCenter(): void {}
+  attach(): void {}
+}
 
 /* ============================================================
  * Typewren 编辑器装配
@@ -139,7 +167,8 @@ export async function createEditor(options: CreateEditorOptions): Promise<Editor
         ...prev,
         attributes: {
           ...prev.attributes,
-          spellcheck: 'false',
+          // 拼写检查属性由 ui/spellcheck.ts 全权管理（菜单开关），
+          // 不能写死在这里：attributes 会在每次视图更新时重写，覆盖开关状态
           class: 'typewren-prosemirror'
         },
         handlePaste: (_view, event) => {
@@ -173,11 +202,22 @@ export async function createEditor(options: CreateEditorOptions): Promise<Editor
     .use(blockMathFullInputRule)
     .use(blockMathEmptyInputRule)
     .use(inlineMathInputRule)
+    .use(remarkMermaidPlugin)
+    .use(mermaidBlockSchema)
+    .use(mermaidBlockView)
+    .use(mermaidInputConvert)
+    .use(remarkTocPlugin)
+    .use(tocSchema)
+    .use(tocView)
+    .use(tocRefreshPlugin)
     .use(tableTools)
     .use(taskListToggle)
     .use(tableScrollView)
     .use(viewEvents)
     .use(emptyDocPlaceholder)
+    .use(writingPlugin(() => writingModesSlot ?? (new NullModes() as WritingModesLike)))
+    // Tab 插入制表符（否则 PM 默认把焦点移出编辑器）
+    .use(tabKeyPlugin)
     .create();
 
   function view(): EditorView {

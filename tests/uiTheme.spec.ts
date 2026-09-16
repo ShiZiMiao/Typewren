@@ -108,6 +108,14 @@ test.describe('大纲面板', () => {
       await sendCommand(app, 'view:outline');
       await app.window.waitForTimeout(300);
     }
+    // 归一化侧栏 tab 为「大纲」（文件 tab 会隐藏 #outline-tree）
+    const outlineActive = await app.window
+      .locator('#side-panel .side-tab[data-tab="outline"]')
+      .evaluate((el) => el.classList.contains('active'));
+    if (!outlineActive) {
+      await app.window.locator('#side-panel .side-tab[data-tab="outline"]').click();
+      await app.window.waitForTimeout(200);
+    }
   }
 
   /** 12 个标题的长文档（标题间夹正文，保证两种模式都需要滚动） */
@@ -124,18 +132,19 @@ test.describe('大纲面板', () => {
     const items = app.window.locator('#outline-tree .outline-item');
     await expect(items).toHaveCount(12, { timeout: 5000 });
 
-    // 记录点击前的滚动位置
-    const scrollTopBefore = await app.window
-      .locator('#editor-container')
-      .evaluate((el) => el.scrollTop);
-    // 点击第 10 个标题
+    // 点击第 10 个标题；跳转后光标落在目标标题（动画为平滑滚动，
+    // 无头环境下 smooth 被 Chromium 禁用，故断言光标落点而非 scrollTop）
     await items.nth(9).evaluate((el) => (el as HTMLButtonElement).click());
-    // 平滑滚动动画完成后验证位置（动画时长 ~300-500ms，1.5s 足够）
-    await app.window.waitForTimeout(1500);
-    const scrollTopAfter = await app.window
-      .locator('#editor-container')
-      .evaluate((el) => el.scrollTop);
-    expect(scrollTopAfter).toBeGreaterThan(scrollTopBefore + 100);
+    // 等 scrollend / 800ms 兜底落光标
+    await app.window.waitForTimeout(1000);
+    const caretHeading = await app.window.evaluate(() => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return '';
+      const node = sel.getRangeAt(0).startContainer;
+      const el = node instanceof HTMLElement ? node : node.parentElement;
+      return el?.closest('h1,h2,h3,h4,h5,h6')?.textContent ?? '';
+    });
+    expect(caretHeading).toContain('第 10 章');
     // 对应大纲项高亮 active
     await expect(items.nth(9)).toHaveClass(/active/);
   });
@@ -192,7 +201,7 @@ test.describe('大纲面板', () => {
     await expect(app.window.locator('#source-textarea')).toBeHidden({ timeout: 5000 });
   });
 
-  test('源码模式跳转：标题对齐视口顶部（与渲染模式一致）', async () => {
+  test('源码模式跳转：光标落在目标标题行（与渲染模式一致）', async () => {
     await ensureOutlineOpen();
     const sections = longSectionsDoc();
     await loadContent(app, sections);
@@ -202,19 +211,23 @@ test.describe('大纲面板', () => {
     const items = app.window.locator('#outline-tree .outline-item');
     await expect(items).toHaveCount(12, { timeout: 5000 });
 
-    // 跳转到第 10 个标题（长文档，必然滚动）
+    // 跳转到第 10 个标题（长文档，平滑滚动由真实环境承担）
     await items.nth(9).evaluate((el) => (el as HTMLButtonElement).click());
-    await app.window.waitForTimeout(1500);
+    // 等 scrollend / 800ms 兜底完成落光标
+    await app.window.waitForTimeout(1200);
 
-    // 光标所在行顶应贴近源码区顶（±40px 容差；对齐顶部而非居中）
-    const offsetTop = await app.window.evaluate(() => {
+    // 光标应落在第 10 章源码行（smooth 在无头下被禁用，以落点为准）
+    const caretLine = await app.window.evaluate(() => {
       const el = document.querySelector('#source-textarea') as HTMLElement;
       const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0) return Number.MAX_SAFE_INTEGER;
-      const rect = sel.getRangeAt(0).getBoundingClientRect();
-      return rect.top - el.getBoundingClientRect().top;
+      if (!sel || sel.rangeCount === 0) return '';
+      const range = sel.getRangeAt(0);
+      const pre = document.createRange();
+      pre.selectNodeContents(el);
+      pre.setEnd(range.startContainer, range.startOffset);
+      return (el.textContent ?? '').slice(pre.toString().length).split('\n')[0] ?? '';
     });
-    expect(Math.abs(offsetTop)).toBeLessThan(40);
+    expect(caretLine).toContain('第 10 章');
 
     // 退出源码模式
     await sendCommand(app, 'view:source');
@@ -267,9 +280,9 @@ test.describe('大纲面板', () => {
     await expect(app.window.locator('#outline-tree .outline-empty')).toContainText('暂无标题');
   });
 
-  test('大纲面板可收起（view:outline 命令）', async () => {
+  test('侧边栏可收起（view:outline 命令）', async () => {
     await ensureOutlineOpen();
-    const panel = app.window.locator('#outline-panel');
+    const panel = app.window.locator('#side-panel');
     await expect(panel).toBeVisible();
 
     // 收起：app 容器获得 outline-collapsed（负外边距推出面板）
@@ -283,5 +296,151 @@ test.describe('大纲面板', () => {
     await expect(app.window.locator('#app')).not.toHaveClass(/outline-collapsed/, {
       timeout: 3000
     });
+  });
+
+  test('大纲跳转高亮锁定：滚动途中不闪动，解锁后联动恢复', async () => {
+    await ensureOutlineOpen();
+    await loadContent(app, longSectionsDoc());
+    const items = app.window.locator('#outline-tree .outline-item');
+    await expect(items).toHaveCount(12, { timeout: 5000 });
+
+    // 点击第 10 章 → 高亮立即指向目标并锁定
+    await items.nth(9).evaluate((el) => (el as HTMLButtonElement).click());
+    await app.window.waitForTimeout(120);
+    await expect(items.nth(9)).toHaveClass(/active/);
+
+    // 锁定期间滚动：active 应仍为第 10 章（不被滚动联动覆盖）
+    await app.window.locator('#editor-container').evaluate((el) => {
+      (el as HTMLElement).scrollTop = (el as HTMLElement).scrollHeight;
+      (el as HTMLElement).scrollTop = 0;
+    });
+    await app.window.waitForTimeout(250);
+    await expect(items.nth(9)).toHaveClass(/active/);
+
+    // 跳转结束（scrollend/超时兜底）解锁后，滚动联动恢复生效
+    await app.window.waitForTimeout(900);
+    await app.window.locator('#editor-container').evaluate((el) => {
+      (el as HTMLElement).scrollTop = (el as HTMLElement).scrollHeight;
+    });
+    await expect(items.nth(11)).toHaveClass(/active/, { timeout: 3000 });
+  });
+});
+
+test.describe('回归：缩放后自绘菜单栏弹出', () => {
+  test('zoom 后点击菜单栏按钮不抛主进程异常', async () => {
+    // 视图 → 放大/缩小 的底层动作就是 webContents.setZoomFactor
+    await app.app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1.25);
+    });
+    await app.window.waitForTimeout(400);
+
+    for (const label of ['文件', '视图']) {
+      await app.window.locator('.menubar-item', { hasText: label }).click();
+      await app.window.waitForTimeout(300);
+      await app.window.keyboard.press('Escape');
+      await app.window.waitForTimeout(300);
+    }
+
+    // 主进程与窗口都健康
+    const alive = await app.app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows().map((w) => !w.isDestroyed())
+    );
+    expect(alive.every(Boolean)).toBe(true);
+    // 恢复缩放，避免影响后续用例
+    await app.app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1);
+    });
+    await app.window.waitForTimeout(200);
+  });
+});
+
+test.describe('侧边栏卡片切换', () => {
+  /** 幂等展开侧栏（注意 view:outline 是切换，已展开时会收起） */
+  async function ensureSidebarOpen(): Promise<void> {
+    const collapsed = await app.window
+      .locator('#app')
+      .evaluate((el) => el.classList.contains('outline-collapsed'));
+    if (collapsed) {
+      await sendCommand(app, 'view:outline');
+      await app.window.waitForTimeout(300);
+    }
+  }
+
+  test('文件 / 大纲 tab 互斥显示（不上下堆叠）', async () => {
+    await ensureSidebarOpen();
+    await loadContent(app, '# 标题\n\n正文');
+
+    // 文件 tab：文件树可见、大纲隐藏
+    await app.window.locator('#side-panel .side-tab[data-tab="files"]').click();
+    await app.window.waitForTimeout(200);
+    await expect(app.window.locator('#filetree-items')).toBeVisible();
+    await expect(app.window.locator('#outline-tree')).toBeHidden();
+
+    // 大纲 tab：互斥反转
+    await app.window.locator('#side-panel .side-tab[data-tab="outline"]').click();
+    await app.window.waitForTimeout(200);
+    await expect(app.window.locator('#outline-tree')).toBeVisible();
+    await expect(app.window.locator('#filetree-items')).toBeHidden();
+  });
+});
+
+test.describe('回归：词内下划线标题（源码模式大纲定位）', () => {
+  test('fused_b / conf_mh 标题可跳转', async () => {
+    const collapsed = await app.window
+      .locator('#app')
+      .evaluate((el) => el.classList.contains('outline-collapsed'));
+    if (collapsed) {
+      await sendCommand(app, 'view:outline');
+      await app.window.waitForTimeout(300);
+    }
+    // 用户文档同构：标题含词内下划线（CommonMark 不视为强调）
+    const md = [
+      '# 【正式】0911 报告（forecast 模式）',
+      '',
+      '## 5. 置信度分档分析（fused_b；排序结论不变）',
+      '',
+      '### 5.1 conf_mh /fused_b（实测）',
+      '',
+      '正文内容。'
+    ].join('\n');
+    await loadContent(app, md);
+    await sendCommand(app, 'view:source');
+    await expect(app.window.locator('#source-textarea')).toBeVisible({ timeout: 5000 });
+
+    const items = app.window.locator('#outline-tree .outline-item');
+    await expect(items).toHaveCount(3, { timeout: 5000 });
+
+    // 点击「5.1 conf_mh /fused_b」
+    await items.filter({ hasText: '5.1 conf_mh' }).click();
+    await app.window.waitForTimeout(400);
+
+    // 源码光标应落在该标题行
+    const caretLine = await app.window.evaluate(() => {
+      const el = document.querySelector('#source-textarea') as HTMLElement;
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return '';
+      const range = sel.getRangeAt(0);
+      const pre = document.createRange();
+      pre.selectNodeContents(el);
+      pre.setEnd(range.startContainer, range.startOffset);
+      return (el.textContent ?? '').slice(pre.toString().length).split('\n')[0] ?? '';
+    });
+    expect(caretLine).toContain('5.1 conf_mh /fused_b');
+
+    await sendCommand(app, 'view:source'); // 回渲染模式
+    await app.window.waitForTimeout(200);
+  });
+});
+
+test.describe('回归：Alt 不唤出原生菜单栏', () => {
+  test('按 Alt 后菜单栏保持隐藏（曾导致左上角误弹「视图」菜单）', async () => {
+    await app.window.keyboard.press('Alt');
+    await app.window.waitForTimeout(300);
+    const state = await app.app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      return { visible: win.isMenuBarVisible(), destroyed: win.isDestroyed() };
+    });
+    expect(state.destroyed).toBe(false);
+    expect(state.visible).toBe(false);
   });
 });

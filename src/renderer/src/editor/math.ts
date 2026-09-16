@@ -181,10 +181,11 @@ class MathBlockView implements NodeView {
     this.dom.classList.add('math-editing');
     this.editorEl.value = this.node.attrs.value as string;
     this.autoResize();
-    requestAnimationFrame(() => {
+    // setTimeout 而非 rAF：无头/后台窗口 rAF 可能被节流，焦点必须随即生效
+    window.setTimeout(() => {
       this.editorEl.focus();
       this.editorEl.setSelectionRange(this.editorEl.value.length, this.editorEl.value.length);
-    });
+    }, 0);
   }
 
   deselectNode(): void {
@@ -271,10 +272,11 @@ class MathInlineView implements NodeView {
     this.dom.classList.add('math-editing');
     this.editorEl.style.display = 'inline-block';
     this.editorEl.value = this.node.attrs.value as string;
-    requestAnimationFrame(() => {
+    // setTimeout 而非 rAF：无头/后台窗口 rAF 可能被节流，焦点必须随即生效
+    window.setTimeout(() => {
       this.editorEl.focus();
       this.editorEl.select();
-    });
+    }, 0);
   }
 
   deselectNode(): void {

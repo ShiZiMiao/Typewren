@@ -1,5 +1,5 @@
 /* ============================================================
- * 界面组件：表格悬浮工具条
+ * 通用界面组件：表格悬浮工具条 / 模态输入框 / 更新下载提示卡
  * ============================================================ */
 
 #typewren-table-tools {
@@ -130,4 +130,120 @@
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* ---------- 更新下载提示卡（右下角非模态浮层，updaters 事件驱动） ---------- */
+
+#update-download-panel {
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--statusbar-height) + 12px);
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  user-select: none;
+}
+
+#update-download-panel.hidden {
+  display: none;
+}
+
+#update-download-panel .udp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#update-download-panel .udp-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#update-download-panel .udp-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+#update-download-panel .udp-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+#update-download-panel .udp-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+#update-download-panel .udp-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 4px;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+/* 下载尚未开始（DNS 连接/校验等）时的占位动画 */
+#update-download-panel .udp-fill.indeterminate {
+  width: 40% !important;
+  background: linear-gradient(90deg, var(--accent-soft) 0%, var(--accent) 50%, var(--accent-soft) 100%);
+  background-size: 200% 100%;
+  animation: udp-indeterminate 1.2s linear infinite;
+}
+
+@keyframes udp-indeterminate {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+#update-download-panel .udp-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+
+#update-download-panel .udp-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+#update-download-panel .udp-btn {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#update-download-panel .udp-btn:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
 }

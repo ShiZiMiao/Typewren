@@ -16,8 +16,14 @@ export interface AppLayout {
   titlebarTitle: HTMLElement;
   menubar: HTMLElement;
   app: HTMLElement;
-  outlinePanel: HTMLElement;
+  sidePanel: HTMLElement;
+  sideTabs: HTMLElement;
+  btnTabFiles: HTMLButtonElement;
+  btnTabOutline: HTMLButtonElement;
+  sideCollapseBtn: HTMLButtonElement;
   outlineTree: HTMLElement;
+  filetreeItems: HTMLElement;
+  btnSidebarToggle: HTMLButtonElement;
   editorContainer: HTMLElement;
   editorHost: HTMLElement;
   sourceContainer: HTMLElement;
@@ -26,7 +32,6 @@ export interface AppLayout {
   wordCountEl: HTMLElement;
   cursorPosEl: HTMLElement;
   btnSourceToggle: HTMLButtonElement;
-  btnOutlineToggle: HTMLButtonElement;
   btnThemeToggle: HTMLButtonElement;
   btnBackgroundSettings: HTMLButtonElement;
   searchBarContainer: HTMLElement;
@@ -67,25 +72,38 @@ export function buildLayout(parent: HTMLElement): AppLayout {
   const app = document.createElement('div');
   app.id = 'app';
 
-  /* ---------- 大纲面板 ---------- */
-  const outlinePanel = document.createElement('aside');
-  outlinePanel.id = 'outline-panel';
+  /* ---------- 侧边栏（文件 / 大纲 可切换卡片，Typora 式） ---------- */
+  const sidePanel = document.createElement('aside');
+  sidePanel.id = 'side-panel';
 
-  const panelHead = document.createElement('div');
-  panelHead.className = 'panel-head';
-  const panelTitle = document.createElement('span');
-  panelTitle.textContent = '大 纲';
-  const collapseBtn = document.createElement('button');
-  collapseBtn.type = 'button';
-  collapseBtn.title = '收起大纲面板 (Ctrl+\\)';
-  collapseBtn.textContent = '‹';
-
-  panelHead.append(panelTitle, collapseBtn);
+  const sideTabs = document.createElement('div');
+  sideTabs.className = 'side-tabs';
+  const btnTabFiles = document.createElement('button');
+  btnTabFiles.type = 'button';
+  btnTabFiles.className = 'side-tab';
+  btnTabFiles.dataset.tab = 'files';
+  btnTabFiles.textContent = '文件';
+  const btnTabOutline = document.createElement('button');
+  btnTabOutline.type = 'button';
+  btnTabOutline.className = 'side-tab';
+  btnTabOutline.dataset.tab = 'outline';
+  btnTabOutline.textContent = '大纲';
+  sideTabs.append(btnTabFiles, btnTabOutline);
 
   const outlineTree = document.createElement('nav');
   outlineTree.id = 'outline-tree';
 
-  outlinePanel.append(panelHead, outlineTree);
+  const filetreeItems = document.createElement('nav');
+  filetreeItems.id = 'filetree-items';
+
+  // 收起按钮（Typora 右下角 ‹ 形态）
+  const sideCollapseBtn = document.createElement('button');
+  sideCollapseBtn.type = 'button';
+  sideCollapseBtn.className = 'side-collapse';
+  sideCollapseBtn.title = '收起侧边栏 (Ctrl+\\)';
+  sideCollapseBtn.textContent = '‹';
+
+  sidePanel.append(sideTabs, outlineTree, filetreeItems, sideCollapseBtn);
 
   /* ---------- 编辑区 ---------- */
   const editorContainer = document.createElement('main');
@@ -111,7 +129,7 @@ export function buildLayout(parent: HTMLElement): AppLayout {
   const searchBarContainer = document.createElement('div');
   searchBarContainer.id = 'search-bar-container';
 
-  app.append(outlinePanel, editorContainer, sourceContainer, searchBarContainer);
+  app.append(sidePanel, editorContainer, sourceContainer, searchBarContainer);
 
   /* ---------- 状态栏 ---------- */
   const statusBar = document.createElement('footer');
@@ -122,10 +140,10 @@ export function buildLayout(parent: HTMLElement): AppLayout {
   btnSourceToggle.title = '切换源代码 / 渲染视图 (Ctrl+/)';
   btnSourceToggle.textContent = '</> 源码';
 
-  const btnOutlineToggle = document.createElement('button');
-  btnOutlineToggle.type = 'button';
-  btnOutlineToggle.title = '显示 / 隐藏大纲面板 (Ctrl+\\)';
-  btnOutlineToggle.textContent = '☰ 大纲';
+  const btnSidebarToggle = document.createElement('button');
+  btnSidebarToggle.type = 'button';
+  btnSidebarToggle.title = '显示 / 隐藏侧边栏 (Ctrl+\\)';
+  btnSidebarToggle.textContent = '☰ 侧栏';
 
   const wordCountEl = document.createElement('span');
   wordCountEl.id = 'word-count';
@@ -150,7 +168,7 @@ export function buildLayout(parent: HTMLElement): AppLayout {
 
   statusBar.append(
     btnSourceToggle,
-    btnOutlineToggle,
+    btnSidebarToggle,
     wordCountEl,
     spacer,
     cursorPosEl,
@@ -167,8 +185,14 @@ export function buildLayout(parent: HTMLElement): AppLayout {
     titlebarTitle,
     menubar,
     app,
-    outlinePanel,
+    sidePanel,
+    sideTabs,
+    btnTabFiles,
+    btnTabOutline,
+    sideCollapseBtn,
     outlineTree,
+    filetreeItems,
+    btnSidebarToggle,
     editorContainer,
     editorHost,
     sourceContainer,
@@ -177,7 +201,6 @@ export function buildLayout(parent: HTMLElement): AppLayout {
     wordCountEl,
     cursorPosEl,
     btnSourceToggle,
-    btnOutlineToggle,
     btnThemeToggle,
     btnBackgroundSettings,
     searchBarContainer

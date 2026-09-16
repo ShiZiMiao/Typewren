@@ -1,11 +1,15 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, session } from 'electron';
 
-import { createMainWindow } from './window';
-import { attachNativeThemeSync, openPathInWindow, registerIpcHandlers } from './io';
+import { createMainWindow, openFileInNewWindow } from './window';
+import { attachNativeThemeSync, registerIpcHandlers, registerPendingOpen } from './io';
 import { installApplicationMenu, refreshApplicationMenu, registerMenuPopup } from './menu';
 import { registerExportHandlers } from './export';
 import { registerImageHandlers } from './images';
-import { checkForUpdates } from './updater';
+import { consumeDrafts, registerDraftHandlers } from './drafts';
+import { flushSessionSave, loadRecentFiles, onRecentsChanged } from './docRegistry';
+import { takeSession } from './session';
+import { planStartupWindows } from './startup';
+import { checkForUpdates, registerUpdaterIpc } from './updater';
 import { isMarkdownPath } from '../shared/ipc';
 
 /** 启动后自动检查更新的延迟 */
@@ -20,21 +24,37 @@ function extractMarkdownPath(argv: string[]): string | null {
   return null;
 }
 
+// 允许用 --user-data-dir=<dir> 隔离用户数据目录（测试用，须在单实例锁之前设置，
+// 锁文件位于 userData 内）
+const userDataArg = process.argv.find((a) => a.startsWith('--user-data-dir='));
+if (userDataArg) {
+  app.setPath('userData', userDataArg.slice('--user-data-dir='.length));
+}
+
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!gotSingleInstanceLock) {
   app.quit();
 } else {
-  let mainWindow: BrowserWindow | null = null;
-
   app.on('second-instance', (_event, argv) => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-      const filePath = extractMarkdownPath(argv);
-      if (filePath) {
-        void openPathInWindow(mainWindow, filePath);
+    const filePath = extractMarkdownPath(argv);
+    if (filePath) {
+      // 多窗口形态：外部打开（双击文件 / 命令行启动）总是新开窗口（重复打开会询问）
+      if (app.isReady()) {
+        void openFileInNewWindow(null, filePath);
+      } else {
+        void app.whenReady().then(() => openFileInNewWindow(null, filePath));
       }
+      return;
+    }
+    // 无文件参数：聚焦/恢复现有窗口，一个都没有则重建
+    const wins = BrowserWindow.getAllWindows();
+    const target = BrowserWindow.getFocusedWindow() ?? wins[wins.length - 1];
+    if (target) {
+      if (target.isMinimized()) target.restore();
+      target.focus();
+    } else {
+      createMainWindow();
     }
   });
 
@@ -42,28 +62,51 @@ if (!gotSingleInstanceLock) {
     registerIpcHandlers();
     registerExportHandlers();
     registerImageHandlers();
+    registerDraftHandlers();
+    registerUpdaterIpc();
+
+    loadRecentFiles();
+    onRecentsChanged(refreshApplicationMenu);
     installApplicationMenu();
     registerMenuPopup();
     attachNativeThemeSync(refreshApplicationMenu);
-    mainWindow = createMainWindow();
 
-    // ---------- 在新窗口中打开文件 ----------
-    ipcMain.on('file:open-in-new-window', (_event, filePath: string) => {
+    // ---------- 新窗口打开（渲染层拖拽/最近文件等发起；重复打开询问） ----------
+    ipcMain.on('file:open-in-new-window', (event, filePath: string) => {
       // 只放行受支持的 Markdown 路径（拖拽/命令行打开场景）
       if (typeof filePath !== 'string' || !isMarkdownPath(filePath)) return;
-      const newWin = createMainWindow();
-      newWin.webContents.once('did-finish-load', () => {
-        void openPathInWindow(newWin, filePath);
-      });
+      void openFileInNewWindow(BrowserWindow.fromWebContents(event.sender), filePath);
     });
 
-    const filePath = extractMarkdownPath(process.argv);
-    if (filePath) {
-      mainWindow.webContents.once('did-finish-load', () => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          void openPathInWindow(mainWindow, filePath);
-        }
-      });
+    // ---------- 拼写检查开关（渲染层菜单命令触发，session 级生效并广播） ----------
+    const applySpellcheck = (on: boolean): void => {
+      try {
+        session.defaultSession.setSpellCheckerEnabled(on);
+      } catch {
+        // 拼写检查词典初始化失败时静默
+      }
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('spellcheck:state', on);
+      }
+    };
+    ipcMain.on('app:set-spellcheck', (_event, enabled: unknown) => {
+      applySpellcheck(enabled === true);
+    });
+
+    // ---------- 启动窗口规划：命令行文件 > 崩溃草稿 > 上次会话 ----------
+    const plan = planStartupWindows(
+      extractMarkdownPath(process.argv),
+      consumeDrafts(),
+      takeSession()
+    );
+    const firstWin = createMainWindow();
+    const [head, ...rest] = plan;
+    if (head) {
+      registerPendingOpen(firstWin, head.path, head.content, head.restore);
+    }
+    for (const entry of rest) {
+      const win = createMainWindow();
+      registerPendingOpen(win, entry.path, entry.content, entry.restore);
     }
 
     setTimeout(() => checkForUpdates(true), UPDATE_CHECK_DELAY_MS);
@@ -71,9 +114,15 @@ if (!gotSingleInstanceLock) {
     app.on('activate', () => {
       // macOS: 点击 Dock 图标时若无窗口则重建
       if (BrowserWindow.getAllWindows().length === 0) {
-        mainWindow = createMainWindow();
+        createMainWindow();
       }
     });
+  });
+
+  app.on('before-quit', () => {
+    // 带窗退出：此刻窗口仍在，立即落盘完整窗口集合（不等防抖）。
+    // 用户逐个关窗后再退出时，before-quit 拿到空集合——同样正确（关窗即不再需要）
+    flushSessionSave();
   });
 
   app.on('window-all-closed', () => {

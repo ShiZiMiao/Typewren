@@ -12,6 +12,8 @@ import {
   MARKDOWN_EXTENSIONS
 } from '../src/shared/ipc';
 import { isSafeLinkHref } from '../src/renderer/src/util/link';
+import { planStartupWindows } from '../src/main/startup';
+import { normalizePopupPosition } from '../src/main/menu';
 import { TITLEBAR_PALETTE } from '../src/shared/titlebar';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -156,5 +158,51 @@ test.describe('标题栏配色常量与 CSS 变量同步', () => {
   test('暗色调色板与 --bg-soft / --text-muted 一致', () => {
     expect(TITLEBAR_PALETTE.dark.color).toBe(cssVar('dark', '--bg-soft'));
     expect(TITLEBAR_PALETTE.dark.symbolColor).toBe(cssVar('dark', '--text-muted'));
+  });
+});
+
+/* ---------- 启动窗口规划（main/startup.ts 纯函数） ---------- */
+const norm = (p: string): string => p.replace(/\\/g, '/').toLowerCase();
+
+test.describe('normalizePopupPosition（menu:popup 坐标归一化）', () => {
+  test('小数坐标取整（页面缩放后 getBoundingClientRect 的 7.5px）', () => {
+    expect(normalizePopupPosition(7.5, 44.2)).toEqual({ x: 8, y: 44 });
+  });
+  test('非有限数 / 非 number 拒绝', () => {
+    expect(normalizePopupPosition(NaN, 10)).toBeNull();
+    expect(normalizePopupPosition(Infinity, 10)).toBeNull();
+    expect(normalizePopupPosition('7', 10)).toBeNull();
+    expect(normalizePopupPosition(undefined, 10)).toBeNull();
+  });
+});
+
+test.describe('planStartupWindows', () => {
+  test('命令行文件优先，忽略会话与草稿', () => {
+    const plan = planStartupWindows(
+      '/docs/a.md',
+      [{ path: '/docs/d.md', content: 'x', savedAt: 1 }],
+      ['/docs/s.md']
+    );
+    expect(plan).toHaveLength(1);
+    expect(norm(plan[0].path)).toContain('a.md');
+    expect(plan[0].content).toBeUndefined();
+  });
+
+  test('草稿在前（带内容与 restore 标记），会话补后且去重', () => {
+    const plan = planStartupWindows(
+      null,
+      [{ path: '/docs/shared.md', content: 'draft', savedAt: 1 }],
+      ['/docs/shared.md', '/docs/only-session.md']
+    );
+    expect(plan).toHaveLength(2);
+    expect(norm(plan[0].path)).toContain('shared.md');
+    expect(plan[0].content).toBe('draft');
+    expect(plan[0].restore).toBe(true);
+    expect(norm(plan[1].path)).toContain('only-session.md');
+    expect(plan[1].content).toBeUndefined();
+  });
+
+  test('空输入 → 空计划（正常开空白窗口）', () => {
+    expect(planStartupWindows(null, [], [])).toHaveLength(0);
   });
 });

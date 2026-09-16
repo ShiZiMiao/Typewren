@@ -7,6 +7,9 @@ import type { FileService } from '@/services/fileService';
 import { currentTheme } from '@/ui/theme';
 import { escapeHtml } from '@/util/escape';
 import { isSafeLinkHref } from '@/util/link';
+import { renderMermaidSvg } from './mermaid';
+import { fillExportToc } from './toc';
+import { buildDocxDoc } from './docxExport';
 
 import variablesCss from '../styles/variables.css?raw';
 import editorCss from '../styles/editor.css?raw';
@@ -22,7 +25,7 @@ import katexCss from 'katex/dist/katex.min.css?raw';
  * CSS 直接内联编辑器同款 variables.css + editor.css。
  * ============================================================ */
 
-export type ExportKind = 'pdf' | 'html';
+export type ExportKind = 'pdf' | 'html' | 'docx' | 'png';
 
 /** 渲染 KaTeX；出错时输出错误提示而非中断导出 */
 function renderMath(latex: string, displayMode: boolean): string {
@@ -51,6 +54,24 @@ function renderFragmentMath(root: HTMLElement): void {
     const latex = (el as HTMLElement).getAttribute('data-inline-math') ?? '';
     el.innerHTML = renderMath(latex, false);
   });
+}
+
+/** Mermaid 图表：把占位节点换成 SVG（渲染是异步的，与导出装配顺序配合） */
+async function renderFragmentMermaid(root: HTMLElement): Promise<void> {
+  const blocks = root.querySelectorAll<HTMLElement>('.typewren-mermaid-block');
+  await Promise.all(
+    Array.from(blocks).map(async (el) => {
+      const code = el.getAttribute('data-mermaid-value') ?? '';
+      const rendered = document.createElement('div');
+      rendered.className = 'mermaid-rendered';
+      try {
+        rendered.innerHTML = await renderMermaidSvg(code);
+      } catch (error) {
+        rendered.innerHTML = `<div class="typewren-math-error">${escapeHtml(String(error))}</div>`;
+      }
+      el.replaceChildren(rendered);
+    })
+  );
 }
 
 /** 代码块着色：优先按 data-language，未注册语言降级自动检测 */
@@ -101,12 +122,18 @@ function sanitizeLinks(root: HTMLElement): void {
 }
 
 /** 把 Markdown 走编辑器 parser 渲染为导出用的 HTML 文档字符串 */
-export function buildExportHtml(editor: Editor, markdown: string, title: string): string {
+export async function buildExportHtml(
+  editor: Editor,
+  markdown: string,
+  title: string
+): Promise<string> {
   const doc: ProseNode = editor.action((ctx) => ctx.get(parserCtx)(markdown));
 
   const content = document.createElement('div');
   content.appendChild(DOMSerializer.fromSchema(doc.type.schema).serializeFragment(doc.content));
   renderFragmentMath(content);
+  await renderFragmentMermaid(content);
+  fillExportToc(content, doc);
   highlightCodeBlocks(content);
   wrapTables(content);
   sanitizeLinks(content);
@@ -147,10 +174,23 @@ export async function exportDocument(
   kind: ExportKind
 ): Promise<void> {
   const base = baseNameWithoutExtension(fileService.fileName);
-  const html = buildExportHtml(editor, fileService.currentMarkdown, base);
+  const suggestedName = `${base}.${kind}`;
+
+  if (kind === 'docx') {
+    const docxDoc = buildDocxDoc(editor, fileService.currentMarkdown);
+    await window.typewren.exportDocument({
+      kind,
+      html: '',
+      suggestedName,
+      docxBlocks: docxDoc.blocks
+    });
+    return;
+  }
+
+  const html = await buildExportHtml(editor, fileService.currentMarkdown, base);
   await window.typewren.exportDocument({
     kind,
     html,
-    suggestedName: `${base}.${kind}`
+    suggestedName
   });
 }

@@ -31,7 +31,89 @@ export interface FileContentPayload {
   content: string;
 }
 
+/** 目录列表项（文件树面板用） */
+export interface DirEntry {
+  name: string;
+  /** 相对目录的路径（绝对路径由主进程拼接后返回，渲染层不自行拼） */
+  fullPath: string;
+  isDir: boolean;
+  isMarkdown: boolean;
+}
+
+/** 文件树面板列目录请求 */
+export interface ListDirPayload {
+  /** 当前文档绝对路径；主进程以此为根校验 dirPath 越权 */
+  docPath: string;
+  /** 要列的目录；必须是 docPath 所在目录或其子目录 */
+  dirPath: string;
+}
+
 export type OpenFileResult = FileContentPayload;
+
+/**
+ * 待打开文件（渲染进程就绪后经 file:take-pending-open 领取）。
+ * restore=true 表示来自崩溃恢复：加载后文档须相对磁盘基线置脏。
+ */
+export interface PendingOpenResult extends FileContentPayload {
+  restore?: boolean;
+}
+
+/** 自绘对话框的通用确认参数（dialog:confirm） */
+export interface ConfirmDialogPayload {
+  message: string;
+  detail?: string;
+  buttons: string[];
+  /** 按 Esc / 关窗视为选中的按钮下标 */
+  cancelId?: number;
+}
+
+/**
+ * 另存为后迁移附件：主进程从 fromDoc 所在目录的 assets/ 复制到
+ * toDoc 所在目录的 assets/（渲染层只传文档路径，目录仍由主进程推导）。
+ */
+export interface AssetsCopyPayload {
+  fromDoc: string;
+  toDoc: string;
+}
+
+export interface AssetsCopyResult {
+  ok: boolean;
+  copied?: number;
+  error?: string;
+}
+
+export function isAssetsCopyPayload(value: unknown): value is AssetsCopyPayload {
+  if (typeof value !== 'object' || value === null) return false;
+  const { fromDoc, toDoc } = value as Record<string, unknown>;
+  return typeof fromDoc === 'string' && typeof toDoc === 'string';
+}
+
+/** 崩溃恢复草稿（userData/drafts 下一条记录） */
+export interface DraftRecord {
+  /** 文档路径；空串表示未命名文档 */
+  path: string;
+  content: string;
+  savedAt: number;
+}
+
+export function isConfirmDialogPayload(value: unknown): value is ConfirmDialogPayload {
+  if (typeof value !== 'object' || value === null) return false;
+  const { message, detail, buttons, cancelId } = value as Record<string, unknown>;
+  return (
+    typeof message === 'string' &&
+    Array.isArray(buttons) &&
+    buttons.length > 0 &&
+    buttons.every((b) => typeof b === 'string') &&
+    (detail === undefined || typeof detail === 'string') &&
+    (cancelId === undefined || typeof cancelId === 'number')
+  );
+}
+
+export function isDraftSavePayload(value: unknown): value is { path: string; content: string } {
+  if (typeof value !== 'object' || value === null) return false;
+  const { path, content } = value as Record<string, unknown>;
+  return typeof path === 'string' && typeof content === 'string';
+}
 
 export interface SaveAsResult {
   path: string;
@@ -44,11 +126,13 @@ export interface SaveAsPayload {
 
 /** 导出文档载荷（渲染层已拼好完整 HTML 页面，主进程负责写盘 / 打印） */
 export interface ExportDocumentPayload {
-  kind: 'pdf' | 'html';
-  /** 完整 HTML 文档字符串（含内联样式，KaTeX 字体待主进程内联） */
+  kind: 'pdf' | 'html' | 'docx' | 'png';
+  /** 完整 HTML 文档字符串（含内联样式，KaTeX 字体待主进程内联）；docx/png 时可用 */
   html: string;
   /** 导出对话框的默认文件名（含扩展名） */
   suggestedName: string;
+  /** kind=docx 时的结构化块序列（主进程用 docx 库构造） */
+  docxBlocks?: unknown;
 }
 
 export interface ExportDocumentResult {
@@ -135,15 +219,17 @@ export function isSaveAsPayload(value: unknown): value is SaveAsPayload {
 /** 导出载荷的类型守卫（kind / html / suggestedName 逐项校验） */
 export function isExportDocumentPayload(value: unknown): value is ExportDocumentPayload {
   if (typeof value !== 'object' || value === null) return false;
-  const { kind, html, suggestedName } = value as {
+  const { kind, html, suggestedName, docxBlocks } = value as {
     kind?: unknown;
     html?: unknown;
     suggestedName?: unknown;
+    docxBlocks?: unknown;
   };
   return (
-    (kind === 'pdf' || kind === 'html') &&
+    (kind === 'pdf' || kind === 'html' || kind === 'docx' || kind === 'png') &&
     typeof html === 'string' &&
-    typeof suggestedName === 'string'
+    typeof suggestedName === 'string' &&
+    (kind !== 'docx' || Array.isArray(docxBlocks))
   );
 }
 
@@ -174,6 +260,55 @@ export function isImageDownloadPayload(value: unknown): value is ImageDownloadPa
   return typeof url === 'string' && isDocPath(docPath);
 }
 
+/**
+ * 更新下载状态（主进程 → 渲染层 `updater:download-state` 推送）。
+ * 渲染层据此展示下载进度提示卡；phase 为状态机推进方向：
+ * starting → progress → done / canceled / error。
+ */
+export type UpdateDownloadState =
+  | { phase: 'starting'; version: string }
+  | {
+      phase: 'progress';
+      version: string;
+      /** 0-100 的整数百分比 */
+      percent: number;
+      /** 已下载字节 */
+      transferred: number;
+      /** 总字节（未知时为 0） */
+      total: number;
+      /** 实时下载速度（字节/秒） */
+      bytesPerSecond: number;
+    }
+  | { phase: 'done'; version: string }
+  | { phase: 'canceled' }
+  | { phase: 'error'; message: string };
+
+/** 更新下载状态载荷的类型守卫（preload 收主进程推送时过滤） */
+export function isUpdateDownloadState(value: unknown): value is UpdateDownloadState {
+  if (typeof value !== 'object' || value === null) return false;
+  const state = value as Record<string, unknown>;
+  switch (state.phase) {
+    case 'starting':
+      return typeof state.version === 'string';
+    case 'progress':
+      return (
+        typeof state.version === 'string' &&
+        typeof state.percent === 'number' &&
+        typeof state.transferred === 'number' &&
+        typeof state.total === 'number' &&
+        typeof state.bytesPerSecond === 'number'
+      );
+    case 'done':
+      return typeof state.version === 'string';
+    case 'canceled':
+      return true;
+    case 'error':
+      return typeof state.message === 'string';
+    default:
+      return false;
+  }
+}
+
 /** 菜单命令名：主进程发送端与渲染层路由接收端共用，防拼写漂移 */
 export type CommandName =
   | 'new-file'
@@ -181,8 +316,11 @@ export type CommandName =
   | 'save'
   | 'save-as'
   | 'save-and-close'
+  | 'discard-close'
   | 'export:pdf'
   | 'export:html'
+  | 'export:docx'
+  | 'export:png'
   | 'open-file-path'
   | 'format:bold'
   | 'format:italic'
@@ -204,4 +342,10 @@ export type CommandName =
   | 'edit:replace'
   | 'view:source'
   | 'view:outline'
-  | 'view:theme';
+  | 'view:theme'
+  | 'view:focus-mode'
+  | 'view:typewriter-mode'
+  | 'edit:spellcheck'
+  | 'edit:auto-pairs'
+  | 'file:open-smart'
+  | 'global:show-in-folder';

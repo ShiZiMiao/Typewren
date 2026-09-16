@@ -344,7 +344,9 @@
 .typewren-math-block {
   display: block;
   margin: 1em 0;
-  padding: 10px 12px;
+  /* 纵向 padding 兼作溢出裁切的保险边：KaTeX 上下限会顶出内容盒 ~6-8px，
+     块作为 overflow-x 滚动容器在 padding box 边缘裁切 */
+  padding: 12px;
   border-radius: 8px;
   text-align: center;
   overflow-x: auto;
@@ -402,11 +404,43 @@
   opacity: 0.45;
 }
 
+/* KaTeX 的上下限由 .vlist 绝对定位绘制，会顶出 .katex 盒子上沿，
+   故 .katex-display 上绝不能出现 overflow（含 overflow-x:auto——它会连带把
+   overflow-y 计算为 auto 形成裁切）；横向滚动统一由 .typewren-math-block 承担，
+   顶部溢出量由该块自身 padding 吸收（见下方实测值） */
 .katex-display {
   margin: 0 !important;
+}
+
+/* ---------- Mermaid 图表 ---------- */
+.typewren-mermaid-block {
+  display: block;
+  margin: 1em 0;
+  padding: 12px;
+  border-radius: 8px;
+  text-align: center;
   overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 2px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.typewren-mermaid-block:hover {
+  background: var(--bg-soft);
+}
+
+.typewren-mermaid-block.ProseMirror-selectednode {
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent);
+}
+
+.mermaid-rendered {
+  display: flex;
+  justify-content: center;
+}
+
+.mermaid-rendered svg {
+  max-width: 100%;
+  height: auto;
 }
 
 /* ---------- 占位提示（空文档） ---------- */
@@ -424,4 +458,100 @@
   margin: 2px 4px;
   padding: 2px 6px;
   font-size: 13px;
+}
+
+/* ---------- 脚注（gfm preset 原生节点，样式补全） ---------- */
+.ProseMirror sup[data-type='footnote_reference'] {
+  font-size: 0.72em;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.ProseMirror dl[data-type='footnote_definition'] {
+  margin: 0.5em 0 0;
+  padding: 0.5em 1em;
+  font-size: 0.9em;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+
+.ProseMirror dl[data-type='footnote_definition'] dt {
+  display: inline;
+  font-weight: bold;
+  margin-right: 0.5em;
+}
+
+.ProseMirror dl[data-type='footnote_definition'] dd {
+  display: inline;
+  margin: 0;
+}
+
+/* ---------- 目录 [TOC] ---------- */
+.typewren-toc {
+  margin: 1em 0;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--bg-soft);
+  cursor: pointer;
+}
+
+.typewren-toc .toc-hint {
+  display: block;
+  font-size: 0.85em;
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.typewren-toc .toc-list {
+  margin-bottom: 4px;
+}
+
+.typewren-toc .toc-list ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 1.25em;
+  border-left: 1px solid var(--border);
+}
+
+.typewren-toc .toc-list > ul {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: none;
+}
+
+.typewren-toc .toc-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 0.95em;
+  color: var(--text);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.typewren-toc .toc-item:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+.typewren-toc .toc-empty {
+  font-size: 0.9em;
+  color: var(--text-faint);
+}
+
+/* ---------- 写作模式：焦点模式（当前块高亮，其余淡化） ---------- */
+.ProseMirror.focus-mode .typewren-prosemirror > *:not(.focused-block) {
+  opacity: 0.35;
+  transition: opacity 0.18s ease;
+}
+
+/* ---------- 写作模式：打字机模式（光标保持视口中部） ---------- */
+.ProseMirror.typewriter-mode {
+  scroll-padding-top: 45vh;
 }

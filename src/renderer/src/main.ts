@@ -15,14 +15,19 @@ import './styles/widgets.css';
 import './styles/search.css';
 import './styles/background.css';
 
-import { createEditor } from '@/editor/createEditor';
+import { createEditor, bindWritingModes } from '@/editor/createEditor';
 import { buildLayout } from '@/ui/layout';
 import { activeHeadingIndex, createOutlinePanel } from '@/ui/outlinePanel';
 import { SourceModeController } from '@/ui/sourceMode';
 import { updateStatusBar } from '@/ui/statusBar';
 import { initThemeToggle } from '@/ui/theme';
+import { createWritingModes } from '@/ui/writingModes';
+import { createSpellcheck } from '@/ui/spellcheck';
+import { createAutoPairs } from '@/editor/autoPairs';
 import { createSearchBar } from '@/ui/searchBar';
 import { BackgroundSettingsController } from '@/ui/backgroundSettings';
+import { createFileTreePanel } from '@/ui/fileTree';
+import { UpdateDownloadToast } from '@/ui/updateToast';
 import { FileService } from '@/services/fileService';
 import { ImageService, handleImageDrop, handleImagePaste } from '@/services/imagePasteService';
 import { registerCommandRouter } from '@/commandRouter';
@@ -92,6 +97,20 @@ function debounce<T extends (...args: never[]) => void>(
 async function bootstrap(): Promise<void> {
   const layout = buildLayout(document.getElementById('app-root')!);
 
+  // Alt 键拦截：Windows 上 Alt 会聚焦窗口菜单栏（哪怕 autoHideMenuBar），
+  // 配合主进程 setMenuBarVisibility(false) 双保险，防左上角误弹原生菜单。
+  // 注意：Alt 组合键（Alt+F4 等系统级）在 keydown 阶段 intercept 不到，
+  // 这里只管"裸 Alt 触发菜单栏聚焦"的路径。
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key === 'Alt' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+      }
+    },
+    true
+  );
+
   /* ---------- 主题 ---------- */
   initThemeToggle(layout.btnThemeToggle);
 
@@ -105,28 +124,49 @@ async function bootstrap(): Promise<void> {
     });
   });
 
-  /* ---------- 大纲面板折叠状态 ---------- */
+  /* ---------- 侧边栏（文件 / 大纲 卡片切换 + 收起） ---------- */
   const OUTLINE_KEY = 'typewren.outline-collapsed';
+  const TAB_KEY = 'typewren.side-tab';
   let outlineCollapsed = localStorage.getItem(OUTLINE_KEY) === '1';
+  /** 当前激活的侧栏卡片（files | outline） */
+  let activeTab = localStorage.getItem(TAB_KEY) === 'files' ? 'files' : 'outline';
 
-  const applyOutlineState = (): void => {
+  const applySidebarState = (): void => {
     layout.app.classList.toggle('outline-collapsed', outlineCollapsed);
-    layout.btnOutlineToggle.textContent = '☰ 大纲';
+    layout.btnSidebarToggle.textContent = outlineCollapsed ? '☰ 侧栏' : '☰ 侧栏';
+    layout.btnSidebarToggle.classList.toggle('active', !outlineCollapsed);
+    layout.sideCollapseBtn.textContent = outlineCollapsed ? '›' : '‹';
+    layout.sideCollapseBtn.title = outlineCollapsed
+      ? '展开侧边栏 (Ctrl+\\)'
+      : '收起侧边栏 (Ctrl+\\)';
     localStorage.setItem(OUTLINE_KEY, outlineCollapsed ? '1' : '0');
-  };
-  applyOutlineState();
 
-  const toggleOutlinePanel = (): void => {
+    // tab 高亮与内容显示（互斥切换：激活卡片显示，另一张整个隐藏）
+    layout.btnTabFiles.classList.toggle('active', activeTab === 'files');
+    layout.btnTabOutline.classList.toggle('active', activeTab === 'outline');
+    layout.outlineTree.style.display = activeTab === 'outline' ? '' : 'none';
+    layout.filetreeItems.style.display = activeTab === 'files' ? '' : 'none';
+    localStorage.setItem(TAB_KEY, activeTab);
+  };
+  applySidebarState();
+
+  const toggleSidebar = (): void => {
     outlineCollapsed = !outlineCollapsed;
-    applyOutlineState();
+    applySidebarState();
   };
 
-  layout.btnOutlineToggle.addEventListener('click', toggleOutlinePanel);
+  const switchTab = (tab: 'files' | 'outline'): void => {
+    activeTab = tab;
+    applySidebarState();
+    // 首次切到文件卡片时刷新文件树（懒加载，避免每次启动都列目录）
+    if (tab === 'files') fileTree.refresh();
+  };
 
-  document.querySelector('#outline-panel button')?.addEventListener('click', () => {
-    outlineCollapsed = true;
-    applyOutlineState();
-  });
+  layout.btnSidebarToggle.addEventListener('click', toggleSidebar);
+  layout.sideCollapseBtn.addEventListener('click', toggleSidebar);
+  layout.btnTabFiles.addEventListener('click', () => switchTab('files'));
+  layout.btnTabOutline.addEventListener('click', () => switchTab('outline'));
+  // 初始若在文件卡片，等文件树创建后刷新一次（见下方 fileTree 初始化）
 
   /* ---------- 创建编辑器 ---------- */
   // 各服务在 createEditor 之后实例化（编辑器回调只在初始化完成后触发，
@@ -169,6 +209,11 @@ async function bootstrap(): Promise<void> {
   fileService.onTitleChange = (title) => {
     layout.titlebarTitle.textContent = title;
   };
+  const writingModes = createWritingModes(instance.editor);
+  bindWritingModes(writingModes);
+  const spellcheck = createSpellcheck(instance.editor);
+  spellcheck.bindBroadcast();
+  const autoPairs = createAutoPairs(instance.editor);
   const sourceMode = new SourceModeController(
     instance.editor,
     fileService,
@@ -199,6 +244,21 @@ async function bootstrap(): Promise<void> {
     backgroundSettings.togglePanel();
   });
 
+  /* ---------- 文件树面板（内容由侧边栏文件卡片承载） ---------- */
+  const fileTree = createFileTreePanel({
+    root: layout.sidePanel,
+    getDocPath: () => fileService.getFilePath(),
+    onOpen: (path) => {
+      window.typewren.openFileInNewWindow(path);
+    }
+  });
+  // 文档路径变化 → 刷新文件树（加载/另存为后目录可能不同）
+  fileService.onPathChanged = () => fileTree.refresh();
+  fileTree.refresh();
+
+  /* ---------- 更新下载提示卡（进度由主进程推送，需常驻不销毁） ---------- */
+  new UpdateDownloadToast();
+
   outline.refresh();
   refreshStatusBar();
   fileService.markBaseline();
@@ -227,7 +287,10 @@ async function bootstrap(): Promise<void> {
     outline,
     searchBar,
     layout,
-    toggleOutlinePanel
+    toggleSidebar,
+    writingModes,
+    spellcheck,
+    autoPairs
   });
 
   /* ---------- 拖拽文件到窗口：新窗口打开 ---------- */
@@ -300,6 +363,19 @@ async function bootstrap(): Promise<void> {
     } catch {
       // 解析失败忽略
     }
+  }
+
+  /* ---------- 拉取主进程登记的“待打开”文件（文件关联/二次启动/新窗口打开） ---------- */
+  // 必须等命令路由与各服务就绪后再拉取——比主进程 did-finish-load 推送可靠
+  const pending = await window.typewren.takePendingOpen();
+  if (pending) {
+    if (pending.restore) {
+      // 崩溃恢复草稿：以磁盘为基线加载草稿内容，呈未保存状态
+      await fileService.restoreDraft(pending.path, pending.content);
+    } else {
+      await fileService.loadContentFromPath(pending.path, pending.content);
+    }
+    outline.refresh();
   }
 
   instance.focus();

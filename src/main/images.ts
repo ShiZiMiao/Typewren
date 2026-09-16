@@ -1,8 +1,10 @@
 import { app, ipcMain } from 'electron';
-import { promises as fsp } from 'node:fs';
+import { constants as fsConstants, promises as fsp } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 
 import type {
+  AssetsCopyPayload,
+  AssetsCopyResult,
   ImageDownloadPayload,
   ImageSaveFromDataPayload,
   ImageSaveFromPathPayload,
@@ -10,6 +12,7 @@ import type {
 } from '../shared/ipc';
 import {
   IMAGE_EXTENSIONS,
+  isAssetsCopyPayload,
   isImageDownloadPayload,
   isImagePath,
   isImageSaveFromDataPayload,
@@ -243,6 +246,49 @@ export function registerImageHandlers(): void {
         return failResult(message);
       } finally {
         clearTimeout(timer);
+      }
+    }
+  );
+
+  // ---------- 另存为后的附件迁移：源文档同目录 assets/ → 新文档同目录 assets/ ----------
+  ipcMain.handle(
+    'assets:copy',
+    async (_event, payload: AssetsCopyPayload): Promise<AssetsCopyResult> => {
+      try {
+        if (
+          !isAssetsCopyPayload(payload) ||
+          !isAbsolute(payload.fromDoc) ||
+          !isAbsolute(payload.toDoc)
+        ) {
+          return { ok: false, error: '无效的请求参数' };
+        }
+        const srcDir = join(dirname(payload.fromDoc), 'assets');
+        const destDir = join(dirname(payload.toDoc), 'assets');
+        // 同一目录无需复制
+        if (srcDir === destDir) return { ok: true, copied: 0 };
+        let entries: string[];
+        try {
+          entries = await fsp.readdir(srcDir);
+        } catch {
+          // 源 assets 目录不存在（文档从未插入过本地图片）视为成功空操作
+          return { ok: true, copied: 0 };
+        }
+        await fsp.mkdir(destDir, { recursive: true });
+        let copied = 0;
+        // 只复制受支持的图片，已存在的跳过（不覆盖新位置的同名文件）
+        for (const name of entries.slice(0, 5000)) {
+          if (!isImagePath(name)) continue;
+          const dest = join(destDir, name);
+          try {
+            await fsp.copyFile(join(srcDir, name), dest, fsConstants.COPYFILE_EXCL);
+            copied += 1;
+          } catch {
+            // 已存在或单个文件失败：跳过
+          }
+        }
+        return { ok: true, copied };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
     }
   );

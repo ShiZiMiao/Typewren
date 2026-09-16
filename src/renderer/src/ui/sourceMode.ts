@@ -3,6 +3,16 @@ import type { Editor } from '@milkdown/kit/core';
 import { setMarkdown } from '../editor/actions';
 import type { FileService } from '../services/fileService';
 import { insertTextViaInputEvent } from '../util/inputEvent';
+import {
+  anchorToSourceCaret,
+  captureEditorAnchor,
+  lineAt,
+  placeEditorCursor,
+  placeSourceCaret,
+  sourceLines,
+  type EditorAnchor,
+  type SourceExitAnchor
+} from './positionSync';
 import { applySourceHighlight, clearSourceHighlight } from './sourceHighlight';
 
 /* ============================================================
@@ -22,6 +32,11 @@ export interface SourceStateSnapshot {
 export class SourceModeController {
   private active = false;
   private highlightTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** 渲染→源码切换时记录的渲染侧锚点（切换后定位用） */
+  private pendingEditorAnchor: EditorAnchor | null = null;
+  /** 源码→渲染切换时记录的源码侧锚点（切换后定位用） */
+  private pendingSourceAnchor: SourceExitAnchor | null = null;
 
   /** 源码文本/光标变化回调（供大纲 active 联动等消费方） */
   onCaretMove: ((text: string, pos: number) => void) | null = null;
@@ -48,11 +63,11 @@ export class SourceModeController {
         this.notifyCaretMove();
       });
     }
-    // Tab 键插入两个空格而非移动焦点
+    // Tab 键插入制表符而非移动焦点（与渲染模式 tabKey 插件行为一致）
     this.sourceEl.addEventListener('keydown', (event) => {
       if (event.key === 'Tab') {
         event.preventDefault();
-        insertTextViaInputEvent(this.sourceEl, '  ');
+        insertTextViaInputEvent(this.sourceEl, '\t');
         this.fileService.handleDocUpdated();
         this.onStateChange();
         this.notifyCaretMove();
@@ -141,6 +156,9 @@ export class SourceModeController {
     if (this.active) return;
     this.active = true;
 
+    // 进入前捕获渲染侧锚点：切过去后把源码光标/滚动放到同一位置
+    this.pendingEditorAnchor = captureEditorAnchor(this.editor);
+
     this.setContent(this.displayContent());
     this.fileService.sourceAccessor = () => this.getText();
 
@@ -149,9 +167,17 @@ export class SourceModeController {
     this.button.textContent = '¶ 渲染';
     this.button.title = '返回渲染视图 (Ctrl+/)';
 
-    requestAnimationFrame(() => {
+    // setTimeout 而非 requestAnimationFrame：无头/后台窗口 rAF 可能被节流，
+    // 定位/焦点必须在切换指令后必然执行（setTimeout 0 次帧排队同样满足时序）
+    window.setTimeout(() => {
+      const anchor = this.pendingEditorAnchor;
+      this.pendingEditorAnchor = null;
       this.sourceEl.focus();
-    });
+      if (!this.active || !anchor) return;
+      const caret = anchorToSourceCaret(this.getText(), anchor);
+      // 顶部对齐（与渲染模式跳转一致）+ 瞬时定位（避免从文档顶部滑过来的动画）
+      if (caret !== null) placeSourceCaret(this.sourceEl, caret, 'top', 'auto');
+    }, 0);
     this.onStateChange();
   }
 
@@ -160,6 +186,15 @@ export class SourceModeController {
     this.active = false;
 
     const value = this.getText();
+
+    // 退出前记录源码锚点：write back 后把渲染光标放回同一处
+    const caret = this.getCursorPos();
+    const lines = sourceLines(value);
+    this.pendingSourceAnchor = {
+      lineText: lines[lineAt(lines, caret)]?.content ?? '',
+      lineIndex: lineAt(lines, caret),
+      lineCount: lines.length
+    };
 
     // 先解除劫持再写回，确保脏检测对比的是真实文档内容
     this.fileService.sourceAccessor = null;
@@ -177,5 +212,14 @@ export class SourceModeController {
     this.button.textContent = '</> 源码';
     this.button.title = '切换源代码 / 渲染视图 (Ctrl+/)';
     this.onStateChange();
+
+    // setMarkdown（replaceAll）是异步事务，等一帧文档就绪后再定位；若期间又切回源码则放弃。
+    // setTimeout 而非 rAF：无头/后台窗口 rAF 可能被节流导致定位永不执行
+    const anchor = this.pendingSourceAnchor;
+    this.pendingSourceAnchor = null;
+    window.setTimeout(() => {
+      if (this.active) return;
+      placeEditorCursor(this.editor, anchor);
+    }, 0);
   }
 }
