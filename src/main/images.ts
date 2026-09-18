@@ -1,7 +1,8 @@
-import { app, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, protocol } from 'electron';
 import { constants as fsConstants, promises as fsp } from 'node:fs';
-import { basename, dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
+import { fromLocalImageUrl, IMAGE_URL_SCHEME } from '../shared/imageUrl';
 import type {
   AssetsCopyPayload,
   AssetsCopyResult,
@@ -134,7 +135,66 @@ function failResult(error: unknown): ImageSaveResult {
   };
 }
 
+/** 扩展名 → Content-Type（协议响应头） */
+const IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+  '.tif': 'image/tiff',
+  '.tiff': 'image/tiff'
+};
+
+/**
+ * 编辑器内图片加载协议：
+ * 渲染层把本地图片引用（相对 ./assets/… 或绝对路径）解析为
+ * `typewren-img://local/<encodeURIComponent(绝对路径)>` 后由浏览器发起加载，
+ * 这里解码读盘返回。页面基址是应用目录（dev 为 localhost、打包为 out/renderer），
+ * 相对 src 永远解不到文档目录——协议是"按文档目录解析"的唯一落点。
+ * 校验口径与落盘一致：绝对路径 + 受支持图片扩展名（防任意文件被读出）。
+ */
+export function registerImageProtocol(): void {
+  protocol.handle(IMAGE_URL_SCHEME, async (request) => {
+    const filePath = fromLocalImageUrl(request.url);
+    if (!filePath || !isAbsolute(filePath)) {
+      return new Response('Bad Request', { status: 400 });
+    }
+    const absolute = resolve(filePath);
+    if (!isImagePath(absolute)) {
+      return new Response('Forbidden', { status: 403 });
+    }
+    try {
+      const data = await fsp.readFile(absolute);
+      const dot = absolute.lastIndexOf('.');
+      const ext = dot >= 0 ? absolute.slice(dot).toLowerCase() : '';
+      return new Response(new Uint8Array(data), {
+        headers: { 'content-type': IMAGE_MIME[ext] ?? 'application/octet-stream' }
+      });
+    } catch {
+      return new Response('Not Found', { status: 404 });
+    }
+  });
+}
+
 export function registerImageHandlers(): void {
+  // ---------- 「插入图片」原生文件选择框（多选；仅受支持图片扩展名） ----------
+  ipcMain.handle('dialog:open-image', async (event): Promise<string[]> => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return [];
+    const extensions = (IMAGE_EXTENSIONS as readonly string[]).map((ext) => ext.slice(1));
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择图片',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: '图片', extensions }]
+    });
+    if (result.canceled || result.filePaths.length === 0) return [];
+    return result.filePaths;
+  });
+
   // ---------- 本地文件 → assets 复制 ----------
   ipcMain.handle(
     'image:save-from-path',

@@ -33,7 +33,6 @@ export interface AppLayout {
   cursorPosEl: HTMLElement;
   btnSourceToggle: HTMLButtonElement;
   btnThemeToggle: HTMLButtonElement;
-  btnBackgroundSettings: HTMLButtonElement;
   searchBarContainer: HTMLElement;
 }
 
@@ -138,7 +137,7 @@ export function buildLayout(parent: HTMLElement): AppLayout {
   const btnSourceToggle = document.createElement('button');
   btnSourceToggle.type = 'button';
   btnSourceToggle.title = '切换源代码 / 渲染视图 (Ctrl+/)';
-  btnSourceToggle.textContent = '</> 源码';
+  btnSourceToggle.textContent = '¶ 源码';
 
   const btnSidebarToggle = document.createElement('button');
   btnSidebarToggle.type = 'button';
@@ -161,18 +160,12 @@ export function buildLayout(parent: HTMLElement): AppLayout {
   btnThemeToggle.title = '切换亮色 / 暗色主题';
   btnThemeToggle.textContent = '☾ 暗色';
 
-  const btnBackgroundSettings = document.createElement('button');
-  btnBackgroundSettings.type = 'button';
-  btnBackgroundSettings.title = '背景图片设置';
-  btnBackgroundSettings.textContent = '🖼 背景';
-
   statusBar.append(
-    btnSourceToggle,
     btnSidebarToggle,
+    btnSourceToggle,
     wordCountEl,
     spacer,
     cursorPosEl,
-    btnBackgroundSettings,
     btnThemeToggle
   );
 
@@ -202,7 +195,6 @@ export function buildLayout(parent: HTMLElement): AppLayout {
     cursorPosEl,
     btnSourceToggle,
     btnThemeToggle,
-    btnBackgroundSettings,
     searchBarContainer
   };
 }

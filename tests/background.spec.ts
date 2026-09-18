@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { launchApp, closeApp, type AppHandle } from './helpers';
+import { launchApp, closeApp, sendCommand, type AppHandle } from './helpers';
 
 let app: AppHandle;
 /** --test 未隔离 userData，先快照再还原，避免污染真实配置 */
@@ -33,7 +33,11 @@ const DATA_URL =
 const openPanel = async (): Promise<void> => {
   const visible = (await app.window.locator('.bg-settings-panel.visible').count()) > 0;
   if (!visible) {
-    await app.window.click('#status-bar button[title="背景图片设置"]');
+    // 入口已从状态栏移入「视图」菜单（view:background-settings）
+    await sendCommand(app, 'view:background-settings');
+    // 命令打开面板时鼠标从未进过窗口：先移入一次建立 hover，
+    // 否则后续 wheel 每次多付 ~1s hit-test（无头窗口下 wheel 已偏慢）
+    await app.window.mouse.move(4, 4);
   }
   await app.window.waitForSelector('.bg-settings-panel.visible');
 };
@@ -127,6 +131,8 @@ test.describe('背景图片-拖动选择显示区域', () => {
   });
 
   test('滚轮缩放预览图并同步编辑器与持久化', async () => {
+    // 无头窗口下每次 wheel 分发本身 ~2s（11 次 ≈ 22s+），30s 默认超时贴边
+    test.setTimeout(90000);
     await setBackground();
     await openPanel();
     await expect(app.window.locator('.bg-settings-drag-img')).toBeVisible();

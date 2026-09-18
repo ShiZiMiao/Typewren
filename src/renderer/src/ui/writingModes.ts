@@ -20,18 +20,27 @@ const TYPEWRITER_KEY = 'typewren.typewriter-mode';
 /** 打字机模式光标准线（相对容器高度的中点比例） */
 const TYPEWRITER_CENTER_RATIO = 0.5;
 
-/** 光标所在块的锚点区间（decoration 用；before/after 为含起不含止的标准节点边界） */
+/** 光标所在块的锚点区间（decoration 用；before/after 为含起不含止的标准节点边界）
+ * 光标在表格内时以整张表为焦点块（单元格属于表格的"正文块"，只高亮 cell 里的
+ * 段落会连累整表淡化、当前块反而不突出）；否则取所在 textblock。 */
 function focusedBlockRange(state: EditorState): { from: number; to: number } | null {
   const $from = state.selection.$from;
   const depth = $from.depth;
+  let textblockRange: { from: number; to: number } | null = null;
   // 向上找到 textblock（或 atom/cell 容器）；depth 0 是 doc
   for (let d = depth; d >= 1; d--) {
     const node = $from.node(d);
-    if (node.isTextblock || node.type.name === 'table_cell' || node.type.name === 'table_header') {
+    if (node.type.name === 'table') {
       return { from: $from.before(d), to: $from.after(d) };
     }
+    if (
+      !textblockRange &&
+      (node.isTextblock || node.type.name === 'table_cell' || node.type.name === 'table_header')
+    ) {
+      textblockRange = { from: $from.before(d), to: $from.after(d) };
+    }
   }
-  return null;
+  return textblockRange;
 }
 
 const focusDecoKey = new PluginKey<DecorationSet>('typewrenFocusDeco');
@@ -142,6 +151,11 @@ export function writingPlugin(modes: () => WritingModesLike) {
         modes().attach(view);
         return {
           update: (v: EditorView, prev: EditorView['state']) => {
+            // 模式类必须每次更新都同步：PM 的 attributes（editorViewOptionsCtx）
+            // 会在 docView 更新时重写 view.dom，任何时序/插件差异都可能把
+            // focus-mode/typewriter-mode 抹掉（仅 toggle 时加类并不可靠）。
+            v.dom.classList.toggle('focus-mode', modes().isFocus);
+            v.dom.classList.toggle('typewriter-mode', modes().isTypewriter);
             if (modes().isTypewriter && !prev.selection.eq(v.state.selection)) {
               modes().scrollToCenter(v);
             }

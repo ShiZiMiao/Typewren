@@ -95,4 +95,23 @@ test.describe('编辑增强', () => {
     const starCount = (finalText.match(/\*/g) ?? []).length;
     expect(starCount).toBeLessThanOrEqual(2);
   });
+
+  test('成对符号补全：连续星号形成 **加粗**（不出现 *** 与残留星）', async () => {
+    await presetSetting('typewren.auto-pairs', '1');
+    await loadContent(app, '');
+    await app.window.locator('.ProseMirror').click();
+    // ** ：第二颗 * 应跳过（光标越过自动补的关符号），文档保持 **
+    await app.window.keyboard.type('*');
+    await app.window.keyboard.type('*');
+    await app.window.waitForTimeout(120);
+    expect((await app.window.locator('.ProseMirror').textContent()) ?? '').toBe('**');
+    // 正文 + 两次 * 收尾 → 强调规则转成粗体，无残留星号
+    await app.window.keyboard.type('加粗');
+    await app.window.keyboard.type('*');
+    await app.window.keyboard.type('*');
+    await app.window.waitForTimeout(200);
+    const finalText = (await app.window.locator('.ProseMirror').textContent()) ?? '';
+    expect(finalText.replace(/\*/g, '')).toBe('加粗');
+    expect((finalText.match(/\*/g) ?? []).length).toBe(0);
+  });
 });

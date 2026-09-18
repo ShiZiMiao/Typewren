@@ -6,10 +6,10 @@ import type { OutlineController } from '@/ui/outlinePanel';
 import type { SearchBar } from '@/ui/searchBar';
 import type { SourceModeController } from '@/ui/sourceMode';
 import type { FileService } from '@/services/fileService';
+import type { ImageService } from '@/services/imagePasteService';
 import { exportDocument } from '@/editor/exportDocument';
 import {
   insertHr,
-  insertImage,
   insertMathBlock,
   insertMathInline,
   insertOrUpdateLink,
@@ -25,6 +25,7 @@ import { toggleTheme } from '@/ui/theme';
 import type { WritingModes } from '@/ui/writingModes';
 import type { SpellcheckController } from '@/ui/spellcheck';
 import type { AutoPairsController } from '@/editor/autoPairs';
+import type { BackgroundSettingsController } from '@/ui/backgroundSettings';
 
 /* ============================================================
  * 命令路由：主进程菜单 / 快捷键命令 (cmd 通道) → 编辑器与 UI 操作
@@ -34,6 +35,7 @@ import type { AutoPairsController } from '@/editor/autoPairs';
 export interface CommandRouterDeps {
   editor: Editor;
   fileService: FileService;
+  imageService: ImageService;
   sourceMode: SourceModeController;
   outline: OutlineController;
   searchBar: SearchBar;
@@ -42,10 +44,11 @@ export interface CommandRouterDeps {
   writingModes: WritingModes;
   spellcheck: SpellcheckController;
   autoPairs: AutoPairsController;
+  backgroundSettings: BackgroundSettingsController;
 }
 
 export function registerCommandRouter(deps: CommandRouterDeps): void {
-  const { editor, fileService, sourceMode, outline, searchBar, layout } = deps;
+  const { editor, fileService, imageService, sourceMode, outline, searchBar, layout } = deps;
 
   window.typewren.onCommand((name, payload) => {
     switch (name) {
@@ -117,7 +120,8 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
         void insertOrUpdateLink(editor);
         break;
       case 'format:image':
-        void insertImage(editor);
+        // 原生图片选择框 → 落盘到文档 assets 后插入（与粘贴同一条落盘链路）
+        void imageService.pickAndInsertLocally();
         break;
 
       /* 标题与列表 */
@@ -175,6 +179,9 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
         layout.btnThemeToggle.textContent = toggleTheme() === 'dark' ? '☀ 亮色' : '☾ 暗色';
         break;
       }
+      case 'view:background-settings':
+        deps.backgroundSettings.togglePanel();
+        break;
       case 'view:focus-mode':
         deps.writingModes.toggleFocus();
         break;

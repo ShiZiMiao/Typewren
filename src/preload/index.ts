@@ -24,6 +24,8 @@ const api: TypewrenApi = {
 
   openFileDialog: () => ipcRenderer.invoke('dialog:open-file'),
 
+  openImageDialog: () => ipcRenderer.invoke('dialog:open-image'),
+
   saveFileDialog: (payload) => ipcRenderer.invoke('dialog:save-as', payload),
 
   writeFile: (payload) => ipcRenderer.invoke('file:write', payload),
@@ -83,7 +85,7 @@ const api: TypewrenApi = {
 
   requestForceClose: () => ipcRenderer.send('win:request-force-close'),
 
-  popupMenu: (label, x, y) => ipcRenderer.send('menu:popup', { label, x, y }),
+  popupMenu: (label, x, y, states) => ipcRenderer.send('menu:popup', { label, x, y, states }),
 
   onCommand: (callback) => {
     const handler = (_event: Electron.IpcRendererEvent, name: string, payload?: unknown): void =>

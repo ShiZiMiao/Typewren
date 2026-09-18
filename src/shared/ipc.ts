@@ -345,6 +345,7 @@ export type CommandName =
   | 'view:theme'
   | 'view:focus-mode'
   | 'view:typewriter-mode'
+  | 'view:background-settings'
   | 'edit:spellcheck'
   | 'edit:auto-pairs'
   | 'file:open-smart'

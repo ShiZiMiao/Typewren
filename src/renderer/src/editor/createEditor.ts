@@ -36,6 +36,7 @@ import {
   remarkMermaidPlugin
 } from './mermaid';
 import { remarkTocPlugin, tocRefreshPlugin, tocSchema, tocView } from './toc';
+import { imageSrcView } from './imageView';
 import { tableTools } from './tableTools';
 import { taskListToggle } from './taskToggle';
 import { writingPlugin, WritingModes, type WritingModesLike } from '../ui/writingModes';
@@ -188,6 +189,8 @@ export async function createEditor(options: CreateEditorOptions): Promise<Editor
       });
     })
     .use(commonmark)
+    // 图片节点视图：本地引用解析为 typewren-img://（见 imageView.ts）
+    .use(imageSrcView)
     .use(gfm)
     .use(highlight)
     .use(history)

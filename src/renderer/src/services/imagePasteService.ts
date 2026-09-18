@@ -29,7 +29,7 @@ function normalizePath(p: string): string {
 }
 
 /** 取路径的目录部分（兼容 / 与 \\，渲染层不依赖 node:path） */
-function dirnamePath(p: string): string {
+export function dirnamePath(p: string): string {
   const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
   return idx < 0 ? p : p.slice(0, idx);
 }
@@ -55,15 +55,19 @@ export class ImageService {
     private readonly fileService: FileService
   ) {}
 
-  /** 当前文档绝对路径（主进程据此推导同目录 assets 落盘）；未保存为 null */
+  /** 当前文档绝对路径（主进程据此推导同目录 assets 落盘）；未保存为 null：
+   *  空串一并归 null（open-file-path 空路径的窗口也是"未保存"语义，
+   *  主进程 validDocPath 只收 null 或绝对路径） */
   private docPath(): string | null {
-    return this.fileService.getFilePath();
+    return this.fileService.getFilePath() || null;
   }
 
   /** 绝对保存路径 → Markdown 引用（文档内相对路径优先） */
   private markdownSrc(savedPath: string): string {
     const docPath = this.fileService.getFilePath();
-    if (!docPath) return encodeURI(savedPath);
+    // 未保存文档：正斜杠绝对路径（必须转正斜杠——反斜杠经 encodeURI
+    // 变 %5C 后既污染 Markdown 又会被解析成未知协议，正是"粘贴不显示"的老坑）
+    if (!docPath) return encodeURI(normalizePath(savedPath));
     const rel = relativeTo(dirnamePath(docPath), savedPath);
     return `./${encodeURI(rel)}`;
   }
@@ -93,6 +97,15 @@ export class ImageService {
   async insertFromUrl(url: string): Promise<void> {
     const result = await this.api.downloadImage({ url, docPath: this.docPath() });
     if (result.ok && result.savedPath) this.insertImage(this.markdownSrc(result.savedPath));
+  }
+
+  /** 菜单「插入图片」：原生文件选择框（多选）→ 逐个按粘贴同款流程落盘并插入 */
+  async pickAndInsertLocally(): Promise<void> {
+    const paths = await this.api.openImageDialog();
+    if (!paths || paths.length === 0) return;
+    for (const path of paths) {
+      await this.insertFromPath(path);
+    }
   }
 
   /* ---------- 内部实现 ---------- */

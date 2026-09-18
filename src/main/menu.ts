@@ -16,12 +16,14 @@ function item(
   return {
     label,
     accelerator,
+    // 附带 command 供 menu:popup 按渲染层状态补 checkbox（运行时字段）
+    command,
     click: (_menuitem, focusedWindow) => {
       const win =
         focusedWindow instanceof BrowserWindow ? focusedWindow : BrowserWindow.getAllWindows()[0];
       if (win) sendCommand(win, command, payload);
     }
-  };
+  } as MenuItemConstructorOptions;
 }
 
 function buildRecentSubmenu(): MenuItemConstructorOptions[] {
@@ -138,6 +140,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         item('大纲面板', 'view:outline', 'CmdOrCtrl+\\'),
         item('焦点模式', 'view:focus-mode'),
         item('打字机模式', 'view:typewriter-mode'),
+        item('背景图片设置…', 'view:background-settings'),
         item('切换亮色 / 暗色主题', 'view:theme', 'CmdOrCtrl+Shift+L'),
         { type: 'separator' },
         { label: '放大', role: 'zoomIn' },
@@ -192,6 +195,23 @@ export function refreshApplicationMenu(): void {
   installApplicationMenu();
 }
 
+/**
+ * 勾选态补给：模板项若带 command 且渲染层上报了对应状态，
+ * 转成 checkbox 项（menu:popup 每次重建模板，勾选态永远是最新）。
+ */
+function withCheckedStates(
+  items: MenuItemConstructorOptions[],
+  states: Record<string, boolean>
+): MenuItemConstructorOptions[] {
+  return items.map((m) => {
+    const command = (m as { command?: string }).command;
+    if (command && typeof states[command] === 'boolean') {
+      return { ...m, type: 'checkbox' as const, checked: states[command] };
+    }
+    return m;
+  });
+}
+
 /** 顶层菜单项的子菜单（自绘菜单栏弹出用） */
 function getSubmenuTemplate(label: string): MenuItemConstructorOptions[] | null {
   const top = buildTemplate().find((m) => m.label === label);
@@ -217,29 +237,36 @@ export function normalizePopupPosition(x: unknown, y: unknown): { x: number; y: 
  * 由主进程把对应子菜单以原生样式弹出在指定窗口坐标。
  */
 export function registerMenuPopup(): void {
-  ipcMain.on('menu:popup', (event, payload: { label: string; x: number; y: number }) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || win.isDestroyed()) return;
-    if (
-      !payload ||
-      typeof payload.label !== 'string' ||
-      typeof payload.x !== 'number' ||
-      typeof payload.y !== 'number'
-    ) {
-      return;
+  ipcMain.on(
+    'menu:popup',
+    (event, payload: { label: string; x: number; y: number; states?: Record<string, boolean> }) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win || win.isDestroyed()) return;
+      if (
+        !payload ||
+        typeof payload.label !== 'string' ||
+        typeof payload.x !== 'number' ||
+        typeof payload.y !== 'number'
+      ) {
+        return;
+      }
+      const sub = getSubmenuTemplate(payload.label);
+      if (!sub) return;
+      const pos = normalizePopupPosition(payload.x, payload.y);
+      if (!pos) return;
+      // 测试模式不真实弹出：窗口已抑制显示（--test/--headless），但 Menu.popup
+      // 仍会试着把菜单弹到屏幕（窗口 bounds 位于原点时就是左上角冒菜单，
+      // 用户看到的就是测试跑出的"莫名其妙弹窗"）。参数校验路径完整保留。
+      if (process.argv.includes('--test') || process.argv.includes('--headless')) return;
+      const states =
+        payload.states && typeof payload.states === 'object'
+          ? (payload.states as Record<string, boolean>)
+          : {};
+      Menu.buildFromTemplate(withCheckedStates(sub, states)).popup({
+        window: win,
+        x: pos.x,
+        y: pos.y
+      });
     }
-    const sub = getSubmenuTemplate(payload.label);
-    if (!sub) return;
-    const pos = normalizePopupPosition(payload.x, payload.y);
-    if (!pos) return;
-    // 测试模式不真实弹出：窗口已抑制显示（--test/--headless），但 Menu.popup
-    // 仍会试着把菜单弹到屏幕（窗口 bounds 位于原点时就是左上角冒菜单，
-    // 用户看到的就是测试跑出的"莫名其妙弹窗"）。参数校验路径完整保留。
-    if (process.argv.includes('--test') || process.argv.includes('--headless')) return;
-    Menu.buildFromTemplate(sub).popup({
-      window: win,
-      x: pos.x,
-      y: pos.y
-    });
-  });
+  );
 }

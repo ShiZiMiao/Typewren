@@ -215,24 +215,6 @@ export async function insertOrUpdateLink(editor: Editor): Promise<void> {
   });
 }
 
-export async function insertImage(editor: Editor): Promise<void> {
-  const src = await promptDialog({
-    title: '插入图片',
-    label: '图片地址',
-    defaultValue: 'https://'
-  });
-  if (!src || src.trim().length === 0 || src.trim() === 'https://') return;
-  const target = src.trim();
-
-  const alt = await promptDialog({
-    title: '图片替代文字',
-    label: '替代文字（可选）',
-    defaultValue: ''
-  });
-  if (alt === null) return;
-  insertMarkdown(editor, `![${alt}](${target})`);
-}
-
 /** 在光标处插入一个行内公式节点 */
 export function insertMathInline(editor: Editor): void {
   insertMathNode(editor, (ctx) => mathInlineSchema.type(ctx).create({ value: '' }));

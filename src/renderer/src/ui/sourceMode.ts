@@ -209,7 +209,8 @@ export class SourceModeController {
 
     this.app.classList.remove('source-mode');
     this.button.classList.remove('active');
-    this.button.textContent = '</> 源码';
+    // 与源码态「¶ 源码」等宽同构（</> 比 ¶ 宽，切换时按钮会跳动）
+    this.button.textContent = '¶ 渲染';
     this.button.title = '切换源代码 / 渲染视图 (Ctrl+/)';
     this.onStateChange();
 

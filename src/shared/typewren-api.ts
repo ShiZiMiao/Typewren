@@ -37,6 +37,9 @@ export interface TypewrenApi {
   /** 弹出原生打开对话框，读取文件内容；取消或失败返回 null */
   openFileDialog(): Promise<OpenFileResult | null>;
 
+  /** 弹出原生图片选择框（多选）；取消返回空数组 */
+  openImageDialog(): Promise<string[]>;
+
   /** 弹出原生另存为对话框并写入；取消或失败返回 null */
   saveFileDialog(payload: SaveAsPayload): Promise<SaveAsResult | null>;
 
@@ -109,8 +112,9 @@ export interface TypewrenApi {
   /** 渲染进程完成保存后请求真正关闭窗口 */
   requestForceClose(): void;
 
-  /** 在指定窗口坐标弹出某顶级菜单的子菜单（自绘菜单栏用） */
-  popupMenu(label: string, x: number, y: number): void;
+  /** 在指定窗口坐标弹出某顶级菜单的子菜单（自绘菜单栏用）；states 使对应
+   * 命令项以勾选态显示（焦点模式/打字机模式/拼写检查/成对符号补全等开关） */
+  popupMenu(label: string, x: number, y: number, states?: Record<string, boolean>): void;
 
   /**
    * 订阅主进程派发的命令（菜单/快捷键触发）。

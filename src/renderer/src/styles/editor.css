@@ -545,8 +545,10 @@
   color: var(--text-faint);
 }
 
-/* ---------- 写作模式：焦点模式（当前块高亮，其余淡化） ---------- */
-.ProseMirror.focus-mode .typewren-prosemirror > *:not(.focused-block) {
+/* ---------- 写作模式：焦点模式（当前块高亮，其余淡化） ----------
+ * typewren-prosemirror 与 .ProseMirror 是同一元素（editorViewOptionsCtx.attributes
+ * 落在 view.dom 上），不能写后代选择器，否则永不匹配、焦点模式无视觉效果。 */
+.ProseMirror.focus-mode > *:not(.focused-block):not(.ProseMirror-gapcursor) {
   opacity: 0.35;
   transition: opacity 0.18s ease;
 }

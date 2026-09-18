@@ -15,6 +15,7 @@ import { isSafeLinkHref } from '../src/renderer/src/util/link';
 import { planStartupWindows } from '../src/main/startup';
 import { normalizePopupPosition } from '../src/main/menu';
 import { TITLEBAR_PALETTE } from '../src/shared/titlebar';
+import { fromLocalImageUrl, resolveImageSrc, toLocalImageUrl } from '../src/shared/imageUrl';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -204,5 +205,56 @@ test.describe('planStartupWindows', () => {
 
   test('空输入 → 空计划（正常开空白窗口）', () => {
     expect(planStartupWindows(null, [], [])).toHaveLength(0);
+  });
+});
+
+test.describe('shared/imageUrl 图片协议 URL', () => {
+  test('toLocalImageUrl / fromLocalImageUrl 往返（含中文与空格）', () => {
+    const path = String.raw`D:\文档 目录\图片 01.png`;
+    const url = toLocalImageUrl(path);
+    expect(url.startsWith('typewren-img://local/')).toBe(true);
+    expect(fromLocalImageUrl(url)).toBe('D:/文档 目录/图片 01.png');
+  });
+
+  test('非本协议 URL 解析返回 null（大小写耐药）', () => {
+    expect(fromLocalImageUrl('https://x/y.png')).toBeNull();
+    expect(fromLocalImageUrl('typewren-img://local/')).toBeNull();
+    expect(fromLocalImageUrl('TYPEWREN-IMG://local/abc')).toBe('abc');
+  });
+
+  test('resolveImageSrc：相对引用按文档目录解析', () => {
+    expect(resolveImageSrc('./assets/a.png', 'D:/docs')).toBe(
+      'typewren-img://local/' + encodeURIComponent('D:/docs/assets/a.png')
+    );
+    expect(resolveImageSrc('../pics/b.png', 'D:/docs/blog')).toBe(
+      'typewren-img://local/' + encodeURIComponent('D:/docs/pics/b.png')
+    );
+    // 无文档目录时无法解析，原样返回（浏览器按页面基址解析，自会 404）
+    expect(resolveImageSrc('./assets/a.png', null)).toBe('./assets/a.png');
+  });
+
+  test('resolveImageSrc：绝对路径与既有协议透传/转换', () => {
+    expect(resolveImageSrc('C:/pics/a.png', null)).toBe(
+      'typewren-img://local/' + encodeURIComponent('C:/pics/a.png')
+    );
+    expect(resolveImageSrc('http://x/y.png', 'D:/docs')).toBe('http://x/y.png');
+    expect(resolveImageSrc('data:image/png;base64,AA', 'D:/docs')).toBe(
+      'data:image/png;base64,AA'
+    );
+    expect(resolveImageSrc('file:///D:/a.png', 'D:/docs')).toBe('file:///D:/a.png');
+    // 已解析 URL 不再二次解析
+    const once = toLocalImageUrl('D:/a.png');
+    expect(resolveImageSrc(once, 'D:/docs')).toBe(once);
+  });
+
+  test('resolveImageSrc：兼容 encodeURI 时代反斜杠被编码成 %5C 的历史引用', () => {
+    const legacy = 'C:%5CUsers%5Clecoo%5Cx.png';
+    expect(resolveImageSrc(legacy, null)).toBe(
+      'typewren-img://local/' + encodeURIComponent('C:/Users/lecoo/x.png')
+    );
+    // 相对引用里的 %5C（历史手写）同样先转正再拼文档目录
+    expect(resolveImageSrc('./img%5Ca.png', 'D:/docs')).toBe(
+      'typewren-img://local/' + encodeURIComponent('D:/docs/img/a.png')
+    );
   });
 });

@@ -29,7 +29,13 @@ import { BackgroundSettingsController } from '@/ui/backgroundSettings';
 import { createFileTreePanel } from '@/ui/fileTree';
 import { UpdateDownloadToast } from '@/ui/updateToast';
 import { FileService } from '@/services/fileService';
-import { ImageService, handleImageDrop, handleImagePaste } from '@/services/imagePasteService';
+import {
+  ImageService,
+  dirnamePath,
+  handleImageDrop,
+  handleImagePaste
+} from '@/services/imagePasteService';
+import { refreshAllImageSrcs, setImageDocDirProvider } from '@/editor/imageView';
 import { registerCommandRouter } from '@/commandRouter';
 import { isMarkdownPath } from '../../shared/ipc';
 
@@ -115,10 +121,13 @@ async function bootstrap(): Promise<void> {
   initThemeToggle(layout.btnThemeToggle);
 
   /* ---------- 自绘菜单栏：点击顶级项弹出原生子菜单 ---------- */
+  // 各模式开关状态由控制器持有（bootstrap 后段才创建），这里晚绑定：
+  // 展开菜单时取最新勾选态（menu:popup 每次重建模板，天然新鲜）
+  let getModeStates: () => Record<string, boolean> = () => ({});
   layout.menubar.querySelectorAll<HTMLButtonElement>('.menubar-item').forEach((btn) => {
     btn.addEventListener('click', () => {
       const rect = btn.getBoundingClientRect();
-      window.typewren.popupMenu(btn.dataset.label ?? '', rect.left, rect.bottom);
+      window.typewren.popupMenu(btn.dataset.label ?? '', rect.left, rect.bottom, getModeStates());
       btn.classList.add('open');
       window.setTimeout(() => btn.classList.remove('open'), MENUBAR_HIGHLIGHT_MS);
     });
@@ -172,6 +181,13 @@ async function bootstrap(): Promise<void> {
   // 各服务在 createEditor 之后实例化（编辑器回调只在初始化完成后触发，
   // 闭包引用后续声明的 const 绑定是安全的；若回调在初始化期间触发会暴露 TDZ，
   // 属预期的时序缺陷而非静默错误）
+  // 图片视图的"文档目录"来自 fileService，而 fileService 晚于 createEditor 创建：
+  // 先挂一个逃生者（null 安全），实例化后再 refreshAllImageSrcs 补偿一次
+  let fileServiceRef: FileService | null = null;
+  setImageDocDirProvider(() => {
+    const p = fileServiceRef?.getFilePath();
+    return p ? dirnamePath(p) : null;
+  });
   const refreshStatusBar = (): void => {
     updateStatusBar(instance.editor, layout, sourceMode.getSourceState());
   };
@@ -206,6 +222,9 @@ async function bootstrap(): Promise<void> {
 
   /* ---------- 初始化各模块 ---------- */
   const fileService = new FileService(window.typewren, instance.editor);
+  fileServiceRef = fileService;
+  // 打开/会话恢复的文档可能已含图片，初始渲染时 provider 尚未接线，这里补偿一次
+  refreshAllImageSrcs();
   fileService.onTitleChange = (title) => {
     layout.titlebarTitle.textContent = title;
   };
@@ -214,6 +233,13 @@ async function bootstrap(): Promise<void> {
   const spellcheck = createSpellcheck(instance.editor);
   spellcheck.bindBroadcast();
   const autoPairs = createAutoPairs(instance.editor);
+  // 模式开关状态只在自绘菜单栏弹出时展示（原生 checkbox ✓），状态栏不重复显示
+  getModeStates = () => ({
+    'view:focus-mode': writingModes.isFocus,
+    'view:typewriter-mode': writingModes.isTypewriter,
+    'edit:spellcheck': spellcheck.isEnabled,
+    'edit:auto-pairs': autoPairs.isEnabled
+  });
   const sourceMode = new SourceModeController(
     instance.editor,
     fileService,
@@ -238,11 +264,8 @@ async function bootstrap(): Promise<void> {
     instance.editor
   );
 
-  /* ---------- 背景图片设置 ---------- */
+  /* ---------- 背景图片设置（入口在「视图」菜单） ---------- */
   const backgroundSettings = new BackgroundSettingsController();
-  layout.btnBackgroundSettings.addEventListener('click', () => {
-    backgroundSettings.togglePanel();
-  });
 
   /* ---------- 文件树面板（内容由侧边栏文件卡片承载） ---------- */
   const fileTree = createFileTreePanel({
@@ -253,7 +276,11 @@ async function bootstrap(): Promise<void> {
     }
   });
   // 文档路径变化 → 刷新文件树（加载/另存为后目录可能不同）
-  fileService.onPathChanged = () => fileTree.refresh();
+  // 同时重解析图片引用（另存为后 ./assets/ 的新基准是文档新目录）
+  fileService.onPathChanged = () => {
+    fileTree.refresh();
+    refreshAllImageSrcs();
+  };
   fileTree.refresh();
 
   /* ---------- 更新下载提示卡（进度由主进程推送，需常驻不销毁） ---------- */
@@ -283,6 +310,7 @@ async function bootstrap(): Promise<void> {
   registerCommandRouter({
     editor: instance.editor,
     fileService,
+    imageService,
     sourceMode,
     outline,
     searchBar,
@@ -290,7 +318,8 @@ async function bootstrap(): Promise<void> {
     toggleSidebar,
     writingModes,
     spellcheck,
-    autoPairs
+    autoPairs,
+    backgroundSettings
   });
 
   /* ---------- 拖拽文件到窗口：新窗口打开 ---------- */

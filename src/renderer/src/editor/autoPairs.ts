@@ -27,6 +27,8 @@ const PAIRS: Record<string, string> = {
 };
 /** 闭合符（输入时若右邻是自身 → 越过不插入） */
 const CLOSERS = new Set([')', ']']);
+/** 开=闭同字符对：连续输入两次（`**`）应保持成对并让光标越过，而非插成 `***` */
+const SAME_CHAR_PAIRS = new Set(['*', '_', '`', '~', '$']);
 
 const ENABLE_KEY = 'typewren.auto-pairs';
 
@@ -81,6 +83,14 @@ export class AutoPairsController {
     const prevChar = state.doc.textBetween(Math.max(0, from - 1), from, ' ');
     const nextChar = state.doc.textBetween(to, to + 1, ' ');
     if (CLOSERS.has(ch) && nextChar === ch) {
+      event.preventDefault();
+      const tr = state.tr.setSelection(TextSelection.create(state.doc, to + 1));
+      view.dispatch(tr);
+      return;
+    }
+    // 2b) 同字符对（`*`/`` ` ``/`$` 等）连输第二个：如 `**` 开加粗——
+    // 跳过插入并让光标越过自动补的关符号（插默认会得 `***`，破坏后续强调规则）
+    if (SAME_CHAR_PAIRS.has(ch) && prevChar === ch && nextChar === ch) {
       event.preventDefault();
       const tr = state.tr.setSelection(TextSelection.create(state.doc, to + 1));
       view.dispatch(tr);

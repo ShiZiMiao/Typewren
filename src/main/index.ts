@@ -4,7 +4,7 @@ import { createMainWindow, openFileInNewWindow } from './window';
 import { attachNativeThemeSync, registerIpcHandlers, registerPendingOpen } from './io';
 import { installApplicationMenu, refreshApplicationMenu, registerMenuPopup } from './menu';
 import { registerExportHandlers } from './export';
-import { registerImageHandlers } from './images';
+import { registerImageHandlers, registerImageProtocol } from './images';
 import { consumeDrafts, registerDraftHandlers } from './drafts';
 import { flushSessionSave, loadRecentFiles, onRecentsChanged } from './docRegistry';
 import { takeSession } from './session';
@@ -62,6 +62,8 @@ if (!gotSingleInstanceLock) {
     registerIpcHandlers();
     registerExportHandlers();
     registerImageHandlers();
+    // 图片加载协议须在窗口加载内容之前注册（渲染层 <img> 按此解析本地图片）
+    registerImageProtocol();
     registerDraftHandlers();
     registerUpdaterIpc();
 

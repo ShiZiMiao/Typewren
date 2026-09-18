@@ -48,7 +48,7 @@ test.beforeEach(async () => {
 });
 
 test.describe('图片粘贴/拖拽', () => {
-  test('拖拽图片文件：保存 assets 并插入相对路径', async () => {
+  test('拖拽图片文件：保存 assets、插入相对路径并可真实加载', async () => {
     // 合成带图片文件的 drop 事件（与真实拖拽同一入口 handleImageDrop/insertFiles）
     await window.locator('.ProseMirror').evaluate((el, base64) => {
       const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -58,17 +58,65 @@ test.describe('图片粘贴/拖拽', () => {
     }, PNG_BASE64);
 
     // 等插入的图片元素出现（保存+插入是异步链路）；
-    // 测试环境图片相对路径无法加载，只断言 DOM 与落盘的产物
-    const img = window.locator('.ProseMirror img[src^="./assets/"]');
+    // 编辑器 DOM src 是 typewren-img:// 协议（解析后的可加载 URL），
+    // 而文档内容里的 Markdown 仍是相对路径（见下个用例的打开加载验证）
+    const img = window.locator('.ProseMirror img[src^="typewren-img://local/"]');
     await expect(img).toHaveCount(1, { timeout: 10000 });
 
     const src = await img.getAttribute('src');
-    expect(src).toMatch(/^\.\/assets\/image-\d{8}-\d{6}-\d{4}\.png$/);
+    expect(src).toMatch(/^typewren-img:\/\/local\/.+$/);
+    // 协议 URL 解码后应指向文档同目录 assets/（主进程保存位置）
+    const decoded = decodeURIComponent(src!.slice('typewren-img://local/'.length));
+    expect(decoded.startsWith(WORK_DIR.replace(/\\/g, '/') + '/assets/')).toBe(true);
 
-    // 磁盘上存在该文件且为合法 PNG
-    const savedPath = join(WORK_DIR, src!.replace(/^\.\//, ''));
+    // 磁盘上存在该文件且为合法 PNG，与协议 URL 指向同一路径
+    const savedPath = join(WORK_DIR, 'assets', decoded.split('/').pop()!);
     const buf = readFileSync(savedPath);
     expect(buf.slice(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+
+    // 真实加载断言：主进程协议处理器读盘返回（此前相对 src 在页面基址下 404）
+    await expect
+      .poll(
+        () => img.evaluate((el) => (el as HTMLImageElement).complete && el.naturalWidth > 0),
+        { timeout: 10000 }
+      )
+      .toBe(true);
+  });
+
+  test('打开含相对图片引用的文档：按文档目录解析并加载', async () => {
+    // 预置文档与同目录 assets 图片，文档内是 ./assets/xx.png 相对引用
+    const assetDir = join(WORK_DIR, 'assets');
+    mkdirSync(assetDir, { recursive: true });
+    const imgName = 'existing.png';
+    writeFileSync(join(assetDir, imgName), Buffer.from(PNG_BASE64, 'base64'));
+    const relDoc = join(WORK_DIR, 'rel-test.md');
+    const content = `![x](./assets/${imgName})\n`;
+    writeFileSync(relDoc, content);
+
+    await electronApp.evaluate(
+      ({ BrowserWindow }, { path, content: c }) => {
+        BrowserWindow.getAllWindows()[0].webContents.send('cmd', 'open-file-path', {
+          path,
+          content: c
+        });
+      },
+      { path: relDoc, content }
+    );
+
+    const img = window.locator('.ProseMirror img[src^="typewren-img://local/"]');
+    await expect(img).toHaveCount(1, { timeout: 5000 });
+    const decoded = decodeURIComponent(
+      (await img.getAttribute('src'))!.slice('typewren-img://local/'.length)
+    );
+    expect(decoded).toBe(
+      join(assetDir, imgName).replace(/\\/g, '/')
+    );
+    await expect
+      .poll(
+        () => img.evaluate((el) => (el as HTMLImageElement).complete && el.naturalWidth > 0),
+        { timeout: 10000 }
+      )
+      .toBe(true);
   });
 
   test('本地文件复制：saveImageFromPath 落盘 assets', async () => {

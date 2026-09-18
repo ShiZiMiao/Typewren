@@ -1,7 +1,14 @@
 import { test, expect } from '@playwright/test';
-import { launchApp, closeApp, loadContent, sendCommand, type AppHandle } from './helpers';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { launchApp, closeApp, loadContent, sendCommand, setDialog, type AppHandle } from './helpers';
 
 let app: AppHandle;
+
+/** 1x1 透明 PNG */
+const PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 test.beforeAll(async () => {
   app = await launchApp();
@@ -181,24 +188,27 @@ test.describe('格式命令（cmd 通道直达 actions）', () => {
     );
   });
 
-  test('插入图片', async () => {
+  test('插入图片：原生文件选择框插入本地图片并真实加载', async () => {
     await loadContent(app, '');
     await app.window.locator('.ProseMirror').click();
+
+    // 对话框桩返回预置 PNG（文档未保存 → 落盘 userData/images，Markdown 为绝对路径）
+    const pngDir = join(tmpdir(), 'typewren-actions-img');
+    mkdirSync(pngDir, { recursive: true });
+    const png = join(pngDir, 'insert-me.png');
+    writeFileSync(png, Buffer.from(PNG_BASE64, 'base64'));
+    await setDialog(app, { open: png });
     await sendCommand(app, 'format:image');
-    const dialog = app.window.locator('#prompt-dialog');
-    await expect(dialog).toBeVisible({ timeout: 5000 });
-    await app.window.locator('#prompt-input').fill('https://example.com/pic.png');
-    await app.window.locator('#prompt-ok').click();
 
-    // 第二问：替代文字（容器复用同 id，按 aria-label 区分等待）
-    const second = app.window.locator('#prompt-dialog[aria-label="图片替代文字"]');
-    await expect(second).toBeVisible({ timeout: 5000 });
-    await second.locator('#prompt-input').fill('说明文字');
-    await second.locator('#prompt-ok').click();
-
-    await expect(
-      app.window.locator('.ProseMirror img[src="https://example.com/pic.png"]')
-    ).toHaveCount(1, { timeout: 5000 });
+    const img = app.window.locator('.ProseMirror img[src^="typewren-img://local/"]');
+    await expect(img).toHaveCount(1, { timeout: 8000 });
+    // 未保存文档的绝对路径引用也经本地协议解析——真实加载成功才算通过
+    await expect
+      .poll(
+        () => img.evaluate((el) => (el as HTMLImageElement).complete && el.naturalWidth > 0),
+        { timeout: 8000 }
+      )
+      .toBe(true);
   });
 
   test('撤销（history 插件）', async () => {
