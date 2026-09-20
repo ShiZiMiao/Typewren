@@ -71,6 +71,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
             item('导出为图片（PNG）…', 'export:png')
           ]
         },
+        item('偏好设置…', 'file:preferences', 'CmdOrCtrl+,'),
         { type: 'separator' },
         // 多窗口下 Ctrl+W 关闭当前窗口（最后一个窗口关闭即退出，见 window-all-closed）
         { label: '关闭窗口', role: 'close', accelerator: 'CmdOrCtrl+W' },

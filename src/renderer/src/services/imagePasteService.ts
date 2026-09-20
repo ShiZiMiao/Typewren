@@ -1,6 +1,6 @@
 import type { Editor } from '@milkdown/kit/core';
 
-import type { TypewrenApi } from '../env.d';
+import type { TypewrenApi } from '../../../shared/typewren-api';
 import { isImageFile } from '../../../shared/ipc';
 import { insertMarkdown } from '../editor/actions';
 import type { FileService } from './fileService';

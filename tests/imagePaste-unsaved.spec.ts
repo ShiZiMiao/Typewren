@@ -53,9 +53,8 @@ test('未保存文档粘贴截图：落盘 userData/images 并真实加载', asy
 
   // 真实加载断言：此前 C:%5C… 被当成未知协议、naturalWidth 恒为 0
   await expect
-    .poll(
-      () => img.evaluate((el) => (el as HTMLImageElement).complete && el.naturalWidth > 0),
-      { timeout: 10000 }
-    )
+    .poll(() => img.evaluate((el) => (el as HTMLImageElement).complete && el.naturalWidth > 0), {
+      timeout: 10000
+    })
     .toBe(true);
 });

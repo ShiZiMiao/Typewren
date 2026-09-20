@@ -129,6 +129,69 @@ test.describe('写作模式', () => {
     await app.window.waitForTimeout(150);
   });
 
+  test('焦点模式：光标在引用块内时整块引用为焦点块（曾整体淡化）', async () => {
+    await ensureOff('typewren.focus-mode', 'view:focus-mode');
+    const md = '# 标题\n\n> 引用第一行。\n> 引用第二行。\n\n正文末尾。\n';
+    await loadContent(app, md);
+    await app.window.locator('.ProseMirror blockquote').click();
+    await app.window.waitForTimeout(200);
+
+    await sendCommand(app, 'view:focus-mode');
+    await app.window.waitForTimeout(300);
+    const state = await app.window.evaluate(() => {
+      const pm = document.querySelector('.ProseMirror') as HTMLElement;
+      for (const el of Array.from(pm.children) as HTMLElement[]) el.style.transition = 'none';
+      void pm.offsetHeight;
+      return {
+        focusedQuotes: document.querySelectorAll('blockquote.focused-block').length,
+        quoteOpacity: parseFloat(
+          getComputedStyle(document.querySelector('.ProseMirror > blockquote') as HTMLElement)
+            .opacity
+        ),
+        otherOpacity: parseFloat(
+          getComputedStyle(document.querySelector('.ProseMirror > p') as HTMLElement).opacity
+        )
+      };
+    });
+    expect(state.focusedQuotes).toBe(1);
+    expect(state.quoteOpacity).toBeGreaterThan(0.9);
+    expect(state.otherOpacity).toBeLessThan(0.9);
+
+    await sendCommand(app, 'view:focus-mode');
+    await app.window.waitForTimeout(150);
+  });
+
+  test('焦点模式：光标在列表项内时顶层列表为焦点块（不整列表淡化）', async () => {
+    await ensureOff('typewren.focus-mode', 'view:focus-mode');
+    const md = '# 标题\n\n- 列表A\n- 列表B\n\n正文结尾。\n';
+    await loadContent(app, md);
+    await app.window.locator('.ProseMirror li').first().click();
+    await app.window.waitForTimeout(200);
+
+    await sendCommand(app, 'view:focus-mode');
+    await app.window.waitForTimeout(300);
+    const state = await app.window.evaluate(() => {
+      const pm = document.querySelector('.ProseMirror') as HTMLElement;
+      for (const el of Array.from(pm.children) as HTMLElement[]) el.style.transition = 'none';
+      void pm.offsetHeight;
+      return {
+        focusedLists: document.querySelectorAll('.ProseMirror > ul.focused-block').length,
+        listOpacity: parseFloat(
+          getComputedStyle(document.querySelector('.ProseMirror > ul') as HTMLElement).opacity
+        ),
+        otherOpacity: parseFloat(
+          getComputedStyle(document.querySelector('.ProseMirror > p') as HTMLElement).opacity
+        )
+      };
+    });
+    expect(state.focusedLists).toBe(1);
+    expect(state.listOpacity).toBeGreaterThan(0.9);
+    expect(state.otherOpacity).toBeLessThan(0.9);
+
+    await sendCommand(app, 'view:focus-mode');
+    await app.window.waitForTimeout(150);
+  });
+
   test('焦点模式：模式类被清除后随下一次视图更新自动恢复', async () => {
     await ensureOff('typewren.focus-mode', 'view:focus-mode');
     await loadContent(app, '第一段。\n\n第二段。\n');

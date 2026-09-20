@@ -76,10 +76,9 @@ test.describe('图片粘贴/拖拽', () => {
 
     // 真实加载断言：主进程协议处理器读盘返回（此前相对 src 在页面基址下 404）
     await expect
-      .poll(
-        () => img.evaluate((el) => (el as HTMLImageElement).complete && el.naturalWidth > 0),
-        { timeout: 10000 }
-      )
+      .poll(() => img.evaluate((el) => (el as HTMLImageElement).complete && el.naturalWidth > 0), {
+        timeout: 10000
+      })
       .toBe(true);
   });
 
@@ -108,14 +107,11 @@ test.describe('图片粘贴/拖拽', () => {
     const decoded = decodeURIComponent(
       (await img.getAttribute('src'))!.slice('typewren-img://local/'.length)
     );
-    expect(decoded).toBe(
-      join(assetDir, imgName).replace(/\\/g, '/')
-    );
+    expect(decoded).toBe(join(assetDir, imgName).replace(/\\/g, '/'));
     await expect
-      .poll(
-        () => img.evaluate((el) => (el as HTMLImageElement).complete && el.naturalWidth > 0),
-        { timeout: 10000 }
-      )
+      .poll(() => img.evaluate((el) => (el as HTMLImageElement).complete && el.naturalWidth > 0), {
+        timeout: 10000
+      })
       .toBe(true);
   });
 

@@ -20,27 +20,19 @@ const TYPEWRITER_KEY = 'typewren.typewriter-mode';
 /** 打字机模式光标准线（相对容器高度的中点比例） */
 const TYPEWRITER_CENTER_RATIO = 0.5;
 
-/** 光标所在块的锚点区间（decoration 用；before/after 为含起不含止的标准节点边界）
- * 光标在表格内时以整张表为焦点块（单元格属于表格的"正文块"，只高亮 cell 里的
- * 段落会连累整表淡化、当前块反而不突出）；否则取所在 textblock。 */
+/** 光标所在块的锚点区间（decoration 用；before/after 为含起不含止的标准节点边界）。
+ * 焦点块 = 光标祖先链中**最上层的块节点**：淡化规则作用于顶层子块
+ * （.focus-mode > *），若只取内层 textblock（引用块里的段落、列表里的项、
+ * 单元格里的段落），外层容器会被整体淡化、当前块反而不突出——因此
+ * 引用块取整块引用、列表取整条列表、表格取整表、普通段落取段落本身。 */
 function focusedBlockRange(state: EditorState): { from: number; to: number } | null {
   const $from = state.selection.$from;
-  const depth = $from.depth;
-  let textblockRange: { from: number; to: number } | null = null;
-  // 向上找到 textblock（或 atom/cell 容器）；depth 0 是 doc
-  for (let d = depth; d >= 1; d--) {
-    const node = $from.node(d);
-    if (node.type.name === 'table') {
-      return { from: $from.before(d), to: $from.after(d) };
-    }
-    if (
-      !textblockRange &&
-      (node.isTextblock || node.type.name === 'table_cell' || node.type.name === 'table_header')
-    ) {
-      textblockRange = { from: $from.before(d), to: $from.after(d) };
-    }
+  let topDepth: number | null = null;
+  for (let d = $from.depth; d >= 1; d--) {
+    if ($from.node(d).isBlock) topDepth = d;
   }
-  return textblockRange;
+  if (topDepth === null) return null;
+  return { from: $from.before(topDepth), to: $from.after(topDepth) };
 }
 
 const focusDecoKey = new PluginKey<DecorationSet>('typewrenFocusDeco');

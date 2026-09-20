@@ -16,11 +16,12 @@ import './styles/search.css';
 import './styles/background.css';
 
 import { createEditor, bindWritingModes } from '@/editor/createEditor';
+import { toggleTextMark } from '@/editor/actions';
 import { buildLayout } from '@/ui/layout';
 import { activeHeadingIndex, createOutlinePanel } from '@/ui/outlinePanel';
 import { SourceModeController } from '@/ui/sourceMode';
 import { updateStatusBar } from '@/ui/statusBar';
-import { initThemeToggle } from '@/ui/theme';
+import { initThemeToggle, setThemePreferenceSink } from '@/ui/theme';
 import { createWritingModes } from '@/ui/writingModes';
 import { createSpellcheck } from '@/ui/spellcheck';
 import { createAutoPairs } from '@/editor/autoPairs';
@@ -29,6 +30,13 @@ import { BackgroundSettingsController } from '@/ui/backgroundSettings';
 import { createFileTreePanel } from '@/ui/fileTree';
 import { UpdateDownloadToast } from '@/ui/updateToast';
 import { FileService } from '@/services/fileService';
+import {
+  getAppSettings,
+  loadAppSettings,
+  registerCapabilityAppliers,
+  updateAppSettings
+} from '@/services/appSettings';
+import { SettingsDialog } from '@/ui/settingsDialog';
 import {
   ImageService,
   dirnamePath,
@@ -101,6 +109,9 @@ function debounce<T extends (...args: never[]) => void>(
 }
 
 async function bootstrap(): Promise<void> {
+  // 设置须在手建布局之前读取：排版 CSS 变量与主题在首帧渲染前就位
+  await loadAppSettings();
+
   const layout = buildLayout(document.getElementById('app-root')!);
 
   // Alt 键拦截：Windows 上 Alt 会聚焦窗口菜单栏（哪怕 autoHideMenuBar），
@@ -118,7 +129,9 @@ async function bootstrap(): Promise<void> {
   );
 
   /* ---------- 主题 ---------- */
-  initThemeToggle(layout.btnThemeToggle);
+  // 主题变更 → 写回设置存储（settings.json 权威；localStorage 镜像同步）
+  setThemePreferenceSink((preference) => updateAppSettings({ theme: preference }));
+  initThemeToggle(layout.btnThemeToggle, getAppSettings().theme);
 
   /* ---------- 自绘菜单栏：点击顶级项弹出原生子菜单 ---------- */
   // 各模式开关状态由控制器持有（bootstrap 后段才创建），这里晚绑定：
@@ -230,15 +243,26 @@ async function bootstrap(): Promise<void> {
   };
   const writingModes = createWritingModes(instance.editor);
   bindWritingModes(writingModes);
-  const spellcheck = createSpellcheck(instance.editor);
-  spellcheck.bindBroadcast();
-  const autoPairs = createAutoPairs(instance.editor);
+  // 开关类设置的初始值由控制器按"localStorage 镜像优先"读取（测试预置兼容），
+  // 这里注入写回通道：开关变更统一经设置存储 → 主进程持久化 + 广播
+  const spellcheck = createSpellcheck(instance.editor, getAppSettings().spellcheck);
+  spellcheck.onToggle = (next) => updateAppSettings({ spellcheck: next });
+  const autoPairs = createAutoPairs(instance.editor, getAppSettings().autoPairs);
+  autoPairs.onToggle = (next) => updateAppSettings({ autoPairs: next });
   // 模式开关状态只在自绘菜单栏弹出时展示（原生 checkbox ✓），状态栏不重复显示
   getModeStates = () => ({
     'view:focus-mode': writingModes.isFocus,
     'view:typewriter-mode': writingModes.isTypewriter,
     'edit:spellcheck': spellcheck.isEnabled,
     'edit:auto-pairs': autoPairs.isEnabled
+  });
+  // 设置存储 → 运行时生效点（spellcheck/autoPairs 初始已由构造器处理，
+  // 这里只重装定时器：自动保存 / 崩溃恢复草稿间隔）
+  registerCapabilityAppliers({
+    spellcheck: (enabled) => spellcheck.setEnabled(enabled),
+    autoPairs: (enabled) => autoPairs.setEnabled(enabled),
+    autoSave: (enabled, intervalSec) => fileService.setAutoSave(enabled, intervalSec),
+    draftInterval: (sec) => fileService.setDraftInterval(sec)
   });
   const sourceMode = new SourceModeController(
     instance.editor,
@@ -266,6 +290,9 @@ async function bootstrap(): Promise<void> {
 
   /* ---------- 背景图片设置（入口在「视图」菜单） ---------- */
   const backgroundSettings = new BackgroundSettingsController();
+
+  /* ---------- 偏好设置对话框（入口在「文件」菜单 Ctrl+,） ---------- */
+  const settingsDialog = new SettingsDialog();
 
   /* ---------- 文件树面板（内容由侧边栏文件卡片承载） ---------- */
   const fileTree = createFileTreePanel({
@@ -306,6 +333,19 @@ async function bootstrap(): Promise<void> {
   document.addEventListener('keydown', handleCtrlFH, true);
   layout.sourceTextarea.addEventListener('keydown', handleCtrlFH);
 
+  /* ---------- Ctrl+` 行内代码全局快捷键 ----------
+   * Electron 不认 'CmdOrCtrl+`' 加速器（globalShortcut.register 返回 false，
+   * 菜单里显示的快捷键实际不生效），按键会落到页面——在这里处理，
+   * 与菜单命令走同一个 toggleTextMark 路径。 */
+  const handleCtrlBackquote = (e: KeyboardEvent): void => {
+    if ((e.ctrlKey || e.metaKey) && e.key === '`' && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleTextMark(instance.editor, 'inlineCode');
+    }
+  };
+  document.addEventListener('keydown', handleCtrlBackquote, true);
+
   /* ---------- 主进程命令路由（菜单 / 全局快捷键） ---------- */
   registerCommandRouter({
     editor: instance.editor,
@@ -319,7 +359,8 @@ async function bootstrap(): Promise<void> {
     writingModes,
     spellcheck,
     autoPairs,
-    backgroundSettings
+    backgroundSettings,
+    settingsDialog
   });
 
   /* ---------- 拖拽文件到窗口：新窗口打开 ---------- */

@@ -1,9 +1,10 @@
 import { app, BrowserWindow } from 'electron';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { promises as fsp } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { isMarkdownPath } from '../shared/ipc';
-import { saveSession } from './session';
+import { saveSession, saveSessionSync } from './session';
 
 /* ============================================================
  * 窗口 ↔ 文档路径登记表：多窗口的"哪个窗口开着什么"单一来源。
@@ -66,10 +67,6 @@ export function setWindowDoc(win: BrowserWindow, path: string | null): void {
   scheduleSessionSave();
 }
 
-export function getWindowDoc(win: BrowserWindow): string | null {
-  return docPaths.get(win) ?? null;
-}
-
 /** 查找已打开指定文档的窗口（路径归一化后比较） */
 export function findWindowByDoc(filePath: string): BrowserWindow | null {
   const key = pathKey(filePath);
@@ -108,7 +105,8 @@ export function flushSessionSave(): void {
     clearTimeout(sessionTimer);
     sessionTimer = null;
   }
-  saveSession(currentOpenPaths());
+  // before-quit 用同步落盘：异步写可能赶不上进程退出
+  saveSessionSync(currentOpenPaths());
 }
 
 function recordRecent(filePath: string): void {
@@ -116,11 +114,9 @@ function recordRecent(filePath: string): void {
   const abs = resolve(filePath);
   const key = pathKey(abs);
   recentFiles = [abs, ...recentFiles.filter((p) => pathKey(p) !== key)].slice(0, MAX_RECENT);
-  try {
-    writeFileSync(recentFile(), JSON.stringify(recentFiles), 'utf-8');
-  } catch {
+  void fsp.writeFile(recentFile(), JSON.stringify(recentFiles), 'utf-8').catch(() => {
     // 最近列表尽力而为
-  }
+  });
   try {
     app.addRecentDocument(abs);
   } catch {
@@ -132,11 +128,9 @@ function recordRecent(filePath: string): void {
 export function clearRecentFiles(): void {
   if (TEST_MODE) return;
   recentFiles = [];
-  try {
-    writeFileSync(recentFile(), '[]', 'utf-8');
-  } catch {
+  void fsp.writeFile(recentFile(), '[]', 'utf-8').catch(() => {
     // ignore
-  }
+  });
   app.clearRecentDocuments();
   recentsChanged?.();
 }

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 import { isUpdateDownloadState, type CommandName } from '../shared/ipc';
+import { sanitizeSettings } from '../shared/settings';
 import type { TypewrenApi } from '../shared/typewren-api';
 
 declare const location: { search: string };
@@ -48,13 +49,16 @@ const api: TypewrenApi = {
 
   showInFolder: (filePath) => ipcRenderer.send('file:show-in-folder', filePath),
 
-  setSpellcheck: (enabled) => ipcRenderer.send('app:set-spellcheck', enabled),
+  getSettings: async () => sanitizeSettings(await ipcRenderer.invoke('settings:get')),
 
-  onSpellcheckState: (callback) => {
-    const handler = (_event: Electron.IpcRendererEvent, enabled: boolean): void =>
-      callback(enabled);
-    ipcRenderer.on('spellcheck:state', handler);
-    return () => ipcRenderer.off('spellcheck:state', handler);
+  setSettings: (settings) => ipcRenderer.send('settings:set', settings),
+
+  onSettingsUpdated: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, settings: unknown): void => {
+      callback(sanitizeSettings(settings));
+    };
+    ipcRenderer.on('settings:updated', handler);
+    return () => ipcRenderer.off('settings:updated', handler);
   },
 
   copyAssets: (payload) => ipcRenderer.invoke('assets:copy', payload),

@@ -24,6 +24,7 @@ import type {
   SaveAsResult,
   UpdateDownloadState
 } from './ipc';
+import type { AppSettings } from './settings';
 
 export interface TypewrenApi {
   readonly platform: NodeJS.Platform;
@@ -73,11 +74,14 @@ export interface TypewrenApi {
   /** 在系统资源管理器中定位文件 */
   showInFolder(filePath: string): void;
 
-  /** 切换拼写检查（主进程 session 级生效） */
-  setSpellcheck(enabled: boolean): void;
+  /** 读取应用设置（preferences 对话框数据源；主进程读 userData/settings.json） */
+  getSettings(): Promise<AppSettings>;
 
-  /** 订阅拼写检查状态广播；返回取消订阅函数 */
-  onSpellcheckState(callback: (enabled: boolean) => void): () => void;
+  /** 写入应用设置：主进程持久化、应用副作用（主题/拼写）并广播全部窗口 */
+  setSettings(settings: AppSettings): void;
+
+  /** 订阅设置变更广播（全部窗口，含发起方）；返回取消订阅函数 */
+  onSettingsUpdated(callback: (settings: AppSettings) => void): () => void;
 
   /** 另存为后把源文档同目录 assets 的图片复制到新位置（已存在的跳过） */
   copyAssets(payload: AssetsCopyPayload): Promise<AssetsCopyResult>;

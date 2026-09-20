@@ -349,4 +349,5 @@ export type CommandName =
   | 'edit:spellcheck'
   | 'edit:auto-pairs'
   | 'file:open-smart'
+  | 'file:preferences'
   | 'global:show-in-folder';

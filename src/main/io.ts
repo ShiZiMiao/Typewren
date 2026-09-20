@@ -1,5 +1,5 @@
 import { BrowserWindow, ipcMain, dialog, nativeTheme, shell } from 'electron';
-import { promises as fsp, readdirSync } from 'node:fs';
+import { promises as fsp } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import { TITLEBAR_PALETTE } from '../shared/titlebar';
@@ -267,7 +267,8 @@ export function registerIpcHandlers(): void {
     if (!inTree) return [];
 
     try {
-      const names = readdirSync(dir, { withFileTypes: true });
+      // 异步读目录：文件树面板是用户高频交互，同步 readdirSync 会阻塞主进程
+      const names = await fsp.readdir(dir, { withFileTypes: true });
       const entries: DirEntry[] = [];
       for (const ent of names) {
         const fullPath = join(dir, ent.name);

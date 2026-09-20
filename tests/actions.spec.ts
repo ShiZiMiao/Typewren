@@ -2,7 +2,14 @@ import { test, expect } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { launchApp, closeApp, loadContent, sendCommand, setDialog, type AppHandle } from './helpers';
+import {
+  launchApp,
+  closeApp,
+  loadContent,
+  sendCommand,
+  setDialog,
+  type AppHandle
+} from './helpers';
 
 let app: AppHandle;
 
@@ -58,6 +65,19 @@ test.describe('格式命令（cmd 通道直达 actions）', () => {
 
     await sendCommand(app, 'format:inline-code');
     await expect(app.window.locator('.ProseMirror code')).toHaveCount(1);
+  });
+
+  test('Ctrl+` 触发行内代码（Electron 不认反引号加速器，渲染层 keydown 兜底）', async () => {
+    await loadContent(app, '快捷键测试内容');
+    await selectAll();
+    await app.window.waitForTimeout(200);
+
+    await app.window.keyboard.press('Control+`');
+    await expect(app.window.locator('.ProseMirror code')).toHaveCount(1, { timeout: 5000 });
+
+    // 再按一次取消（toggleMark 语义）
+    await app.window.keyboard.press('Control+`');
+    await expect(app.window.locator('.ProseMirror code')).toHaveCount(0, { timeout: 5000 });
   });
 
   test('标题层级设置与还原正文', async () => {
@@ -204,10 +224,9 @@ test.describe('格式命令（cmd 通道直达 actions）', () => {
     await expect(img).toHaveCount(1, { timeout: 8000 });
     // 未保存文档的绝对路径引用也经本地协议解析——真实加载成功才算通过
     await expect
-      .poll(
-        () => img.evaluate((el) => (el as HTMLImageElement).complete && el.naturalWidth > 0),
-        { timeout: 8000 }
-      )
+      .poll(() => img.evaluate((el) => (el as HTMLImageElement).complete && el.naturalWidth > 0), {
+        timeout: 8000
+      })
       .toBe(true);
   });
 

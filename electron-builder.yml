@@ -19,6 +19,9 @@ win:
         - x64
 
 nsis:
+  # 固定产物文件名（与 latest.yml 的 url 严格一致；默认 "Typewren Setup x.x.x.exe"
+  # 带空格，而 electron-updater 按 url 取文件，两者不一致会导致更新 404）
+  artifactName: Typewren-Setup-${version}.${ext}
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

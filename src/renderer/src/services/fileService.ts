@@ -2,7 +2,7 @@ import type { Editor } from '@milkdown/kit/core';
 import { editorViewCtx } from '@milkdown/kit/core';
 import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 
-import type { TypewrenApi } from '../env.d';
+import type { TypewrenApi } from '../../../shared/typewren-api';
 import { getMarkdown, setMarkdown } from '../editor/actions';
 
 /* ============================================================
@@ -16,7 +16,8 @@ import { getMarkdown, setMarkdown } from '../editor/actions';
  *   比整篇序列化成字符串再比较更快，且“撤销到打开时状态”自然回干净。
  * ============================================================ */
 
-/** 脏文档草稿自动落盘间隔 */
+/** 脏文档草稿自动落盘默认间隔（偏好设置 draftInterval 可改，测试可用
+ * --draft-interval= 覆盖 —— 该覆盖优先级最高，见 forcedDraftIntervalMs） */
 const DRAFT_AUTOSAVE_MS = 30_000;
 
 /** 文档是否引用了同目录 assets/ 下的附件（另存为迁移提示用） */
@@ -64,16 +65,70 @@ export class FileService {
   /** 文档路径变化回调（文件树刷新等；loadContent / saveAs 成功后触发） */
   onPathChanged: (() => void) | null = null;
 
+  /** 草稿落盘定时器（偏好设置 draftInterval 驱动） */
+  private draftTimer: number | undefined;
+  /** 偏好设置中的草稿间隔（ms）；--draft-interval= 测试覆盖优先 */
+  private settingsDraftMs = DRAFT_AUTOSAVE_MS;
+
+  /** 自动保存定时器句柄（偏好设置 autoSave 驱动） */
+  private autoSaveTimer: number | undefined;
+  /** 自动保存间隔（ms） */
+  private autoSaveMs = 60_000;
+  /** 自动保存进行中标志：防止上一轮未写完时并发触发 */
+  private autoSaveInFlight = false;
+
   constructor(
     private readonly api: TypewrenApi,
     private readonly editor: Editor
   ) {
     // 测试模式不碰用户数据目录（草稿/恢复整体静默）
     if (!api.testMode) {
-      const intervalMs = Number(api.draftIntervalMs) || DRAFT_AUTOSAVE_MS;
-      window.setInterval(() => this.syncDraft(), intervalMs);
-      // 正常/意外关闭前都尽力把状态同步到草稿存储
       window.addEventListener('beforeunload', () => this.syncDraft());
+    }
+    this.setDraftTimer(this.draftIntervalMs());
+  }
+
+  /** 草稿间隔：--draft-interval= 测试覆盖优先，否则取偏好设置 */
+  private draftIntervalMs(): number {
+    const forced = Number(this.api.draftIntervalMs);
+    return forced > 0 ? forced : this.settingsDraftMs;
+  }
+
+  private setDraftTimer(intervalMs: number): void {
+    window.clearInterval(this.draftTimer);
+    this.draftTimer = undefined;
+    // 测试模式不落草稿（drafts 主进程侧也未注册）
+    if (this.api.testMode || intervalMs <= 0) return;
+    this.draftTimer = window.setInterval(() => this.syncDraft(), intervalMs);
+  }
+
+  /* ---------- 偏好设置接入点（appSettings 应用器回调） ---------- */
+
+  /** 偏好设置：崩溃恢复草稿间隔（秒）。测试用 --draft-interval= 覆盖不受设置影响 */
+  setDraftInterval(sec: number): void {
+    this.settingsDraftMs = Math.max(1, sec) * 1000;
+    this.setDraftTimer(this.draftIntervalMs());
+  }
+
+  /** 偏好设置：自动保存。开启时定时把脏文档写盘（无路径文档不主动弹另存为） */
+  setAutoSave(enabled: boolean, intervalSec: number): void {
+    this.autoSaveMs = Math.max(1, intervalSec) * 1000;
+    window.clearInterval(this.autoSaveTimer);
+    this.autoSaveTimer = undefined;
+    if (!enabled) return;
+    this.autoSaveTimer = window.setInterval(() => {
+      void this.autoSaveTick();
+    }, this.autoSaveMs);
+  }
+
+  private async autoSaveTick(): Promise<void> {
+    if (this.autoSaveInFlight || this.abandonedForClose) return;
+    if (!this.filePath || !this.isDirty) return;
+    this.autoSaveInFlight = true;
+    try {
+      await this.save();
+    } finally {
+      this.autoSaveInFlight = false;
     }
   }
 

@@ -132,6 +132,169 @@
   color: var(--accent);
 }
 
+/* ---------- 代码块语言就地编辑器（Typora 式：角标变输入框 + 浮层语言列表） ---------- */
+
+.code-lang-editor {
+  /* 与角标同位（pre 内 absolute，pre 有 position:relative） */
+  position: absolute;
+  right: 10px;
+  bottom: 6px;
+  width: 110px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  z-index: 20;
+}
+
+.language-dropdown {
+  position: fixed;
+  z-index: 1300;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+}
+
+.language-dropdown .language-item {
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.language-dropdown .language-item:hover,
+.language-dropdown .language-item.selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.language-dropdown .language-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* ---------- 偏好设置对话框（自研模态，仿 prompt-overlay） ---------- */
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.settings-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 520px;
+  max-height: 82vh;
+  padding: 18px 20px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.settings-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.settings-hint {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.settings-body fieldset {
+  margin: 6px 0 2px;
+  padding: 10px 12px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.settings-body legend {
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  padding: 4px 2px;
+}
+
+.settings-label {
+  font-size: 13px;
+  color: var(--text);
+  user-select: none;
+}
+
+.settings-select,
+.settings-input {
+  width: 200px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.settings-select:focus,
+.settings-input:focus {
+  border-color: var(--accent);
+}
+
+.settings-select:disabled,
+.settings-input:disabled {
+  opacity: 0.5;
+}
+
+.settings-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* ---------- 更新下载提示卡（右下角非模态浮层，updaters 事件驱动） ---------- */
 
 #update-download-panel {

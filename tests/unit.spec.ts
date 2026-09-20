@@ -16,6 +16,7 @@ import { planStartupWindows } from '../src/main/startup';
 import { normalizePopupPosition } from '../src/main/menu';
 import { TITLEBAR_PALETTE } from '../src/shared/titlebar';
 import { fromLocalImageUrl, resolveImageSrc, toLocalImageUrl } from '../src/shared/imageUrl';
+import { DEFAULT_SETTINGS, sanitizeSettings } from '../src/shared/settings';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -238,9 +239,7 @@ test.describe('shared/imageUrl 图片协议 URL', () => {
       'typewren-img://local/' + encodeURIComponent('C:/pics/a.png')
     );
     expect(resolveImageSrc('http://x/y.png', 'D:/docs')).toBe('http://x/y.png');
-    expect(resolveImageSrc('data:image/png;base64,AA', 'D:/docs')).toBe(
-      'data:image/png;base64,AA'
-    );
+    expect(resolveImageSrc('data:image/png;base64,AA', 'D:/docs')).toBe('data:image/png;base64,AA');
     expect(resolveImageSrc('file:///D:/a.png', 'D:/docs')).toBe('file:///D:/a.png');
     // 已解析 URL 不再二次解析
     const once = toLocalImageUrl('D:/a.png');
@@ -256,5 +255,48 @@ test.describe('shared/imageUrl 图片协议 URL', () => {
     expect(resolveImageSrc('./img%5Ca.png', 'D:/docs')).toBe(
       'typewren-img://local/' + encodeURIComponent('D:/docs/img/a.png')
     );
+  });
+});
+
+test.describe('shared/settings 校验', () => {
+  test('非法输入回落默认值', () => {
+    expect(sanitizeSettings(null)).toEqual(DEFAULT_SETTINGS);
+    expect(sanitizeSettings('')).toEqual(DEFAULT_SETTINGS);
+    expect(sanitizeSettings({})).toEqual(DEFAULT_SETTINGS);
+  });
+
+  test('合法字段保留，未知字段丢弃', () => {
+    const s = sanitizeSettings({
+      fontSize: 18,
+      theme: 'dark',
+      autoSave: true,
+      hackerField: 'x'
+    } as unknown);
+    expect(s.fontSize).toBe(18);
+    expect(s.theme).toBe('dark');
+    expect(s.autoSave).toBe(true);
+    expect('hackerField' in s).toBe(false);
+  });
+
+  test('数值越界钳制、类型错误回落', () => {
+    const s = sanitizeSettings({
+      fontSize: 999,
+      lineHeight: 0,
+      editorWidth: 10,
+      autoSaveInterval: 'abc',
+      draftInterval: -5
+    } as unknown);
+    expect(s.fontSize).toBe(32);
+    expect(s.lineHeight).toBe(1);
+    expect(s.editorWidth).toBe(320);
+    expect(s.autoSaveInterval).toBe(DEFAULT_SETTINGS.autoSaveInterval);
+    expect(s.draftInterval).toBe(5);
+  });
+
+  test('非法主题/布尔值回落', () => {
+    const s = sanitizeSettings({ theme: 'blue', spellcheck: 'yes', autoPairs: 1 } as unknown);
+    expect(s.theme).toBe('system');
+    expect(s.spellcheck).toBe(false);
+    expect(s.autoPairs).toBe(true);
   });
 });

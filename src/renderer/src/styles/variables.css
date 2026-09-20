@@ -38,6 +38,9 @@
 
   /* 编辑区 */
   --editor-max-width: min(90vw, 1200px);
+  /* 编辑器排版（偏好设置运行时覆盖；--editor-font-family 未设置时继承 body 字体栈） */
+  --editor-font-size: 16px;
+  --editor-line-height: 1.75;
   --code-bg: #f5f6f8;
   --code-border: #e3e7ec;
   --quote-bar: #c8ced6;

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 
 import { createMainWindow, openFileInNewWindow } from './window';
 import { attachNativeThemeSync, registerIpcHandlers, registerPendingOpen } from './io';
@@ -6,6 +6,7 @@ import { installApplicationMenu, refreshApplicationMenu, registerMenuPopup } fro
 import { registerExportHandlers } from './export';
 import { registerImageHandlers, registerImageProtocol } from './images';
 import { consumeDrafts, registerDraftHandlers } from './drafts';
+import { applyStartupSettings, registerSettingsIpc } from './settings';
 import { flushSessionSave, loadRecentFiles, onRecentsChanged } from './docRegistry';
 import { takeSession } from './session';
 import { planStartupWindows } from './startup';
@@ -66,33 +67,21 @@ if (!gotSingleInstanceLock) {
     registerImageProtocol();
     registerDraftHandlers();
     registerUpdaterIpc();
+    registerSettingsIpc();
 
     loadRecentFiles();
     onRecentsChanged(refreshApplicationMenu);
     installApplicationMenu();
     registerMenuPopup();
     attachNativeThemeSync(refreshApplicationMenu);
+    // 应用持久化设置须在建窗前：窗口底色与拼写检查从一开始就正确
+    applyStartupSettings();
 
     // ---------- 新窗口打开（渲染层拖拽/最近文件等发起；重复打开询问） ----------
     ipcMain.on('file:open-in-new-window', (event, filePath: string) => {
       // 只放行受支持的 Markdown 路径（拖拽/命令行打开场景）
       if (typeof filePath !== 'string' || !isMarkdownPath(filePath)) return;
       void openFileInNewWindow(BrowserWindow.fromWebContents(event.sender), filePath);
-    });
-
-    // ---------- 拼写检查开关（渲染层菜单命令触发，session 级生效并广播） ----------
-    const applySpellcheck = (on: boolean): void => {
-      try {
-        session.defaultSession.setSpellCheckerEnabled(on);
-      } catch {
-        // 拼写检查词典初始化失败时静默
-      }
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed()) win.webContents.send('spellcheck:state', on);
-      }
-    };
-    ipcMain.on('app:set-spellcheck', (_event, enabled: unknown) => {
-      applySpellcheck(enabled === true);
     });
 
     // ---------- 启动窗口规划：命令行文件 > 崩溃草稿 > 上次会话 ----------

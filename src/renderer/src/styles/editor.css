@@ -4,8 +4,10 @@
  * ============================================================ */
 
 .ProseMirror {
-  font-size: 16px;
-  line-height: 1.75;
+  /* 字体族由偏好设置注入 --editor-font-family；未设置时 var 失效 → unset → 继承 body 字体栈 */
+  font-family: var(--editor-font-family);
+  font-size: var(--editor-font-size);
+  line-height: var(--editor-line-height);
   word-wrap: break-word;
   caret-color: var(--accent);
   overflow-x: visible;
@@ -108,20 +110,32 @@
   color: var(--text);
 }
 
-/* 语言角标（右上角） */
-.ProseMirror pre[data-language]::after {
-  content: attr(data-language);
+/* 语言角标（右下角，Typora 式；真实 button，点击修改语言/自动识别） */
+.ProseMirror pre .code-lang-badge {
   position: absolute;
-  top: 5px;
   right: 10px;
+  bottom: 6px;
   font-family: inherit;
   font-size: 11px;
+  line-height: 1.4;
   color: var(--text-faint);
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 1px 7px;
-  pointer-events: none;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+
+.ProseMirror pre:hover .code-lang-badge,
+.ProseMirror pre .code-lang-badge:focus-visible {
+  opacity: 1;
+}
+
+.ProseMirror pre .code-lang-badge:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 /* highlight.js token（颜色来自主题变量） */

@@ -19,6 +19,7 @@ import { $prose, $view } from '@milkdown/kit/utils';
 import { highlight, configureCodeHighlight } from './highlight';
 import { applyStrikethroughFixes } from './strikethroughFix';
 import { tabKeyPlugin } from './tabKey';
+import { codeBlockLanguageView } from './codeBlockView';
 import {
   blockMathEmptyInputRule,
   blockMathFullInputRule,
@@ -189,6 +190,9 @@ export async function createEditor(options: CreateEditorOptions): Promise<Editor
       });
     })
     .use(commonmark)
+    // 代码块语言角标：可点击修改语言 / 空语言自动识别（pre>code 结构不变，
+    // prosemirror-highlight 的 inline decorations 不受影响）
+    .use(codeBlockLanguageView)
     // 图片节点视图：本地引用解析为 typewren-img://（见 imageView.ts）
     .use(imageSrcView)
     .use(gfm)

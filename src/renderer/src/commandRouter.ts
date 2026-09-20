@@ -26,6 +26,7 @@ import type { WritingModes } from '@/ui/writingModes';
 import type { SpellcheckController } from '@/ui/spellcheck';
 import type { AutoPairsController } from '@/editor/autoPairs';
 import type { BackgroundSettingsController } from '@/ui/backgroundSettings';
+import type { SettingsDialog } from '@/ui/settingsDialog';
 
 /* ============================================================
  * 命令路由：主进程菜单 / 快捷键命令 (cmd 通道) → 编辑器与 UI 操作
@@ -45,6 +46,7 @@ export interface CommandRouterDeps {
   spellcheck: SpellcheckController;
   autoPairs: AutoPairsController;
   backgroundSettings: BackgroundSettingsController;
+  settingsDialog: SettingsDialog;
 }
 
 export function registerCommandRouter(deps: CommandRouterDeps): void {
@@ -81,6 +83,9 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
         if (typeof payload === 'string') {
           void fileService.openSmart(payload);
         }
+        break;
+      case 'file:preferences':
+        deps.settingsDialog.open();
         break;
       case 'export:pdf':
         void exportDocument(editor, fileService, 'pdf');

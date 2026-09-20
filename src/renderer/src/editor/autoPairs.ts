@@ -1,12 +1,15 @@
 import type { Editor } from '@milkdown/kit/core';
 import { editorViewCtx } from '@milkdown/kit/core';
 import type { EditorView } from '@milkdown/kit/prose/view';
-import { TextSelection } from '@milkdown/kit/prose/state';
+import { TextSelection, type EditorState } from '@milkdown/kit/prose/state';
 
 /* ============================================================
- * 成对符号补全（Typora 式）：
+ * 成对符号补全（Typora / IDE 式）：
  * - 有选区：输入 `*`/`**`/`` ` ``/`~`/`$`/`[`/`(` 时包裹选区；
- * - 无选区：行首/行尾（两侧安全）时插入开+关符号并把光标放中间；
+ * - 正文：行首/行尾（两侧安全）时插入开+关符号并把光标放中间；
+ * - 代码块内：( [ " 不受两侧安全限制自动成对（IDE 行为，代码里
+ *   紧邻字符也常见），* _ ` ~ $ 等 Markdown 标记维持不补；
+ * - 行内代码（inlineCode mark）内不补全（短代码片段原样输入）；
  * - 光标紧邻一个"疑似刚才自动补的关符号"时，再输入该符号 = 跳过（光标越过）。
  * 全程用 PM 事务 dispatch，不注入 input rules（避免与强调/斜体规则打架），
  * 也不走原生 beforeinput 默认路径（默认路径会触发 input rules）。
@@ -16,6 +19,9 @@ import { TextSelection } from '@milkdown/kit/prose/state';
  * ============================================================ */
 
 const PAIR_CANDIDATES = new Set(['*', '_', '`', '~', '$', '[', '(', ')', ']']);
+/** 代码块内补全集（IDE 式：( [ "；* _ ` ~ $ 是 Markdown 标记维持不补；
+ * ) ] 保留用于"跳过自动补的关符号"判定） */
+const CODE_PAIR_CANDIDATES = new Set(['[', '(', ')', ']', '"']);
 const PAIRS: Record<string, string> = {
   '*': '*',
   _: '_',
@@ -23,12 +29,13 @@ const PAIRS: Record<string, string> = {
   '~': '~',
   $: '$',
   '[': ']',
-  '(': ')'
+  '(': ')',
+  '"': '"'
 };
 /** 闭合符（输入时若右邻是自身 → 越过不插入） */
 const CLOSERS = new Set([')', ']']);
 /** 开=闭同字符对：连续输入两次（`**`）应保持成对并让光标越过，而非插成 `***` */
-const SAME_CHAR_PAIRS = new Set(['*', '_', '`', '~', '$']);
+const SAME_CHAR_PAIRS = new Set(['*', '_', '`', '~', '$', '"']);
 
 const ENABLE_KEY = 'typewren.auto-pairs';
 
@@ -40,9 +47,15 @@ function isSafeToOpen(prev: string | undefined, next: string | undefined): boole
 }
 
 export class AutoPairsController {
-  private enabled = localStorage.getItem(ENABLE_KEY) !== '0';
+  private enabled: boolean;
 
-  constructor(private readonly editor: Editor) {
+  constructor(
+    private readonly editor: Editor,
+    initial: boolean
+  ) {
+    const stored = localStorage.getItem(ENABLE_KEY);
+    // localStorage 镜像优先（旧版遗留/测试预置），settings.json 为权威
+    this.enabled = stored !== null ? stored !== '0' : initial;
     editor.action((ctx) => {
       const view = ctx.get(editorViewCtx);
       // 捕获阶段注册：必须先于 ProseMirror 的 beforeinput 处理
@@ -54,10 +67,32 @@ export class AutoPairsController {
     return this.enabled;
   }
 
-  toggle(): boolean {
-    this.enabled = !this.enabled;
-    localStorage.setItem(ENABLE_KEY, this.enabled ? '1' : '0');
-    return this.enabled;
+  toggle(): void {
+    this.onToggle(!this.enabled);
+  }
+
+  /** 设置存储应用点：同步状态与镜像缓存（供 reload 预置） */
+  setEnabled(enabled: boolean): void {
+    if (this.enabled === enabled) return;
+    this.enabled = enabled;
+    localStorage.setItem(ENABLE_KEY, enabled ? '1' : '0');
+  }
+
+  /** 供主装配注入：把开关变更写回设置存储（onToggle 参数为下一状态） */
+  onToggle: (next: boolean) => void = () => {};
+
+  /** 光标是否位于代码块（code_block 节点祖先链内） */
+  private isInCodeBlock(state: EditorState): boolean {
+    const { $from } = state.selection;
+    for (let d = $from.depth; d > 0; d--) {
+      if ($from.node(d).type.name === 'code_block') return true;
+    }
+    return false;
+  }
+
+  /** 光标是否位于行内代码（inlineCode mark 内）：不补全 */
+  private isInInlineCode(state: EditorState): boolean {
+    return state.selection.$from.marks().some((m) => m.type.name === 'inlineCode');
   }
 
   private handleBeforeInput = (event: InputEvent): void => {
@@ -66,10 +101,16 @@ export class AutoPairsController {
     const data = event.data;
     if (!data || data.length !== 1) return;
     const ch = data[0];
-    if (!PAIR_CANDIDATES.has(ch)) return;
 
     const view = this.editor.action((ctx) => ctx.get(editorViewCtx));
     const { state } = view;
+
+    // 行内代码原样输入（短文本内自动成对反而添乱）
+    if (this.isInInlineCode(state)) return;
+    const inCodeBlock = this.isInCodeBlock(state);
+    const candidates = inCodeBlock ? CODE_PAIR_CANDIDATES : PAIR_CANDIDATES;
+    if (!candidates.has(ch)) return;
+
     const { from, to } = state.selection;
 
     // 1) 有选区：包裹
@@ -88,8 +129,8 @@ export class AutoPairsController {
       view.dispatch(tr);
       return;
     }
-    // 2b) 同字符对（`*`/`` ` ``/`$` 等）连输第二个：如 `**` 开加粗——
-    // 跳过插入并让光标越过自动补的关符号（插默认会得 `***`，破坏后续强调规则）
+    // 2b) 同字符对（`*`/`` ` ``/`$`/`"` 等）连输第二个：如 `**` 开加粗、
+    // 引号跳过自动补的关符号（插默认会得重影）
     if (SAME_CHAR_PAIRS.has(ch) && prevChar === ch && nextChar === ch) {
       event.preventDefault();
       const tr = state.tr.setSelection(TextSelection.create(state.doc, to + 1));
@@ -97,8 +138,12 @@ export class AutoPairsController {
       return;
     }
 
-    // 3) 光标前后安全（行首/空格/行尾）→ 插入开+关并把光标放中间
-    if (prevChar !== ch && isSafeToOpen(prevChar || undefined, nextChar || undefined)) {
+    // 3) 插入开+关并把光标放中间：正文要求两侧安全（行首/空格/行尾），
+    // 代码块内不受此限（IDE 行为，`print(` 这类紧邻位置也补全）
+    if (
+      prevChar !== ch &&
+      (inCodeBlock || isSafeToOpen(prevChar || undefined, nextChar || undefined))
+    ) {
       event.preventDefault();
       this.insertPair(view, ch);
       return;
@@ -128,6 +173,6 @@ export class AutoPairsController {
   }
 }
 
-export function createAutoPairs(editor: Editor): AutoPairsController {
-  return new AutoPairsController(editor);
+export function createAutoPairs(editor: Editor, initial: boolean): AutoPairsController {
+  return new AutoPairsController(editor, initial);
 }
