@@ -6,9 +6,10 @@ import type { EditorView } from '@milkdown/kit/prose/view';
 import { insert, replaceAll } from '@milkdown/kit/utils';
 
 import { mathBlockSchema, mathInlineSchema } from './math';
-import { escapeTracking } from './strikethroughFix';
+import { withEscapeTracking } from './strikethroughFix';
 import { NodeSelection } from '@milkdown/kit/prose/state';
 import { promptDialog } from '../ui/promptDialog';
+import { insertTextViaInputEvent } from '../util/inputEvent';
 import { isSafeLinkHref } from '../util/link';
 
 /* ============================================================
@@ -28,27 +29,30 @@ import { isSafeLinkHref } from '../util/link';
  * 判据用 textContent 而非结构全等：Milkdown 对引用块/列表等结构的
  * 序列化往返存在正常差异，结构全等会把整个文档误判为不兼容而退回
  * 全篇转义。
+ *
+ * 转义跟踪上下文随本次序列化调用成对创建（withEscapeTracking），
+ * 回读重序列化复用同一份并临时切 strict——不再共用模块级全局标志。
  */
 export function getMarkdown(editor: Editor): string {
-  return editor.action((ctx) => {
-    const doc = ctx.get(editorViewCtx).state.doc;
-    const serialize = () => ctx.get(serializerCtx)(doc);
+  return editor.action((ctx) =>
+    withEscapeTracking((esc) => {
+      const doc = ctx.get(editorViewCtx).state.doc;
+      const serialize = () => ctx.get(serializerCtx)(doc);
 
-    escapeTracking.strict = false;
-    escapeTracking.relaxed = false;
-    let markdown = serialize();
+      let markdown = serialize();
 
-    if (escapeTracking.relaxed) {
-      escapeTracking.strict = true;
-      try {
-        const reparsed = ctx.get(parserCtx)(markdown);
-        if (reparsed.textContent !== doc.textContent) markdown = serialize();
-      } finally {
-        escapeTracking.strict = false;
+      if (esc.relaxed) {
+        esc.strict = true;
+        try {
+          const reparsed = ctx.get(parserCtx)(markdown);
+          if (reparsed.textContent !== doc.textContent) markdown = serialize();
+        } finally {
+          esc.strict = false;
+        }
       }
-    }
-    return markdown;
-  });
+      return markdown;
+    })
+  );
 }
 
 /** 用新的 Markdown 内容整体替换文档（打开文件时使用） */
@@ -118,8 +122,20 @@ export function makeCodeBlock(editor: Editor): void {
 
 /* ---------------- 插入类 ---------------- */
 
-/** 在光标处插入原始 Markdown 片段（图片粘贴/拖拽等场景复用） */
+/**
+ * 在光标处插入原始 Markdown 片段（图片粘贴/拖拽等场景复用）。
+ * 源码模式下必须插进源码视图（#source-textarea）——插渲染视图会在退出
+ * 源码时被 sourceMode 的 setMarkdown 写回整段覆盖丢失。源码插入走
+ * insertTextViaInputEvent（触发 input 事件，脏检测/高亮由 sourceMode 的
+ * 监听接管）；判定依据 #app.source-mode 类（sourceMode enter/exit 维护）。
+ */
 export function insertMarkdown(editor: Editor, markdown: string): void {
+  const sourceEl = document.querySelector<HTMLElement>('#source-textarea');
+  if (sourceEl && document.getElementById('app')?.classList.contains('source-mode')) {
+    sourceEl.focus();
+    insertTextViaInputEvent(sourceEl, markdown);
+    return;
+  }
   editor.action(insert(markdown));
   editor.action((ctx) => ctx.get(editorViewCtx).focus());
 }

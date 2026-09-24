@@ -222,7 +222,7 @@ export async function createEditor(options: CreateEditorOptions): Promise<Editor
     .use(tableScrollView)
     .use(viewEvents)
     .use(emptyDocPlaceholder)
-    .use(writingPlugin(() => writingModesSlot ?? (new NullModes() as WritingModesLike)))
+    .use(writingPlugin(() => writingModesSlot ?? new NullModes()))
     // Tab 插入制表符（否则 PM 默认把焦点移出编辑器）
     .use(tabKeyPlugin)
     .create();

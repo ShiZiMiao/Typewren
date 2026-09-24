@@ -6,6 +6,9 @@ import type { EditorState } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
 
+import { localStore } from '../util/storage';
+import { screenPxToLocal } from './zoom';
+
 /* ============================================================
  * 写作模式：焦点模式（当前块高亮，其余淡化）+ 打字机模式
  * （光标始终保持在编辑区中部，输入时自动滚动）
@@ -38,8 +41,8 @@ function focusedBlockRange(state: EditorState): { from: number; to: number } | n
 const focusDecoKey = new PluginKey<DecorationSet>('typewrenFocusDeco');
 
 export class WritingModes {
-  private focusOn = localStorage.getItem(FOCUS_KEY) === '1';
-  private typewriterOn = localStorage.getItem(TYPEWRITER_KEY) === '1';
+  private focusOn = localStore.get(FOCUS_KEY) === '1';
+  private typewriterOn = localStore.get(TYPEWRITER_KEY) === '1';
 
   constructor(private readonly editor: Editor) {
     // 应用持久化状态（首帧）
@@ -60,7 +63,7 @@ export class WritingModes {
 
   toggleFocus(): boolean {
     this.focusOn = !this.focusOn;
-    localStorage.setItem(FOCUS_KEY, this.focusOn ? '1' : '0');
+    localStore.set(FOCUS_KEY, this.focusOn ? '1' : '0');
     this.editor.action((ctx) => {
       const view = ctx.get(editorViewCtx);
       view.dom.classList.toggle('focus-mode', this.focusOn);
@@ -72,7 +75,7 @@ export class WritingModes {
 
   toggleTypewriter(): boolean {
     this.typewriterOn = !this.typewriterOn;
-    localStorage.setItem(TYPEWRITER_KEY, this.typewriterOn ? '1' : '0');
+    localStore.set(TYPEWRITER_KEY, this.typewriterOn ? '1' : '0');
     this.editor.action((ctx) => {
       const view = ctx.get(editorViewCtx);
       view.dom.classList.toggle('typewriter-mode', this.typewriterOn);
@@ -88,8 +91,13 @@ export class WritingModes {
     if (!container) return;
     const coords = view.coordsAtPos(view.state.selection.from);
     const rect = container.getBoundingClientRect();
+    // coords/rect 差值是屏幕像素（zoom 子树内 ×zoom），scrollTop 是局部单位——
+    // ÷zoom 换算再相加（zoom≠100% 时旧公式落点偏移 zoom 倍）；
+    // 容器高度用 clientHeight（局部单位），光标目标 = 内容中部
     const target =
-      coords.top - rect.top + container.scrollTop - rect.height * TYPEWRITER_CENTER_RATIO;
+      container.scrollTop +
+      screenPxToLocal(container, coords.top - rect.top) -
+      container.clientHeight * TYPEWRITER_CENTER_RATIO;
     container.scrollTop = Math.max(0, target);
   }
 

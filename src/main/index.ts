@@ -1,7 +1,8 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow } from 'electron';
 
 import { createMainWindow, openFileInNewWindow } from './window';
-import { attachNativeThemeSync, registerIpcHandlers, registerPendingOpen } from './io';
+import { registerIpcHandlers, registerPendingOpen } from './io';
+import { attachNativeThemeSync, registerThemeIpc } from './themeSync';
 import { installApplicationMenu, refreshApplicationMenu, registerMenuPopup } from './menu';
 import { registerExportHandlers } from './export';
 import { registerImageHandlers, registerImageProtocol } from './images';
@@ -11,16 +12,19 @@ import { flushSessionSave, loadRecentFiles, onRecentsChanged } from './docRegist
 import { takeSession } from './session';
 import { planStartupWindows } from './startup';
 import { checkForUpdates, registerUpdaterIpc } from './updater';
-import { isMarkdownPath } from '../shared/ipc';
+import { isOpenablePath } from '../shared/ipc';
 
 /** 启动后自动检查更新的延迟 */
 const UPDATE_CHECK_DELAY_MS = 3000;
 
-/** 从命令行参数中提取 Markdown 文件路径 */
-function extractMarkdownPath(argv: string[]): string | null {
+/** 从命令行参数中提取可打开文档路径（Markdown / txt） */
+function extractOpenableDocPath(argv: string[]): string | null {
   for (const arg of argv.slice(1)) {
-    if (arg.startsWith('-')) continue;
-    if (isMarkdownPath(arg)) return arg;
+    // 仅跳过 '--' 开头的开关参数：单横线开头也可能是合法文件名（-notes.md），
+    // 旧实现跳过所有 '-' 开头导致这类文件打不开。'-x=y' 式单横线开关会被当
+    // 路径候选，由 isOpenablePath 的扩展名白名单挡掉
+    if (arg.startsWith('--')) continue;
+    if (isOpenablePath(arg)) return arg;
   }
   return null;
 }
@@ -38,7 +42,7 @@ if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   app.on('second-instance', (_event, argv) => {
-    const filePath = extractMarkdownPath(argv);
+    const filePath = extractOpenableDocPath(argv);
     if (filePath) {
       // 多窗口形态：外部打开（双击文件 / 命令行启动）总是新开窗口（重复打开会询问）
       if (app.isReady()) {
@@ -60,7 +64,8 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(() => {
-    registerIpcHandlers();
+    registerIpcHandlers({ openFileInNewWindow });
+    registerThemeIpc();
     registerExportHandlers();
     registerImageHandlers();
     // 图片加载协议须在窗口加载内容之前注册（渲染层 <img> 按此解析本地图片）
@@ -74,30 +79,35 @@ if (!gotSingleInstanceLock) {
     installApplicationMenu();
     registerMenuPopup();
     attachNativeThemeSync(refreshApplicationMenu);
-    // 应用持久化设置须在建窗前：窗口底色与拼写检查从一开始就正确
+    // 应用持久化设置须在建窗前：窗口底色与拼写检查从一开始正确
     applyStartupSettings();
 
-    // ---------- 新窗口打开（渲染层拖拽/最近文件等发起；重复打开询问） ----------
-    ipcMain.on('file:open-in-new-window', (event, filePath: string) => {
-      // 只放行受支持的 Markdown 路径（拖拽/命令行打开场景）
-      if (typeof filePath !== 'string' || !isMarkdownPath(filePath)) return;
-      void openFileInNewWindow(BrowserWindow.fromWebContents(event.sender), filePath);
-    });
-
     // ---------- 启动窗口规划：命令行文件 > 崩溃草稿 > 上次会话 ----------
-    const plan = planStartupWindows(
-      extractMarkdownPath(process.argv),
-      consumeDrafts(),
-      takeSession()
-    );
+    // 坑：consumeDrafts / takeSession 是**破坏性读取**（读后即删）。必须先取 cliFile，
+    // 有命令行文件时完全不调它们（磁盘原样保留，下次启动照常恢复）——写成
+    // planStartupWindows(cliFile, consumeDrafts(), takeSession()) 这样的实参求值
+    // 会让短路丢弃的结果先把草稿/会话吞掉："双击打开任意 md"即永久丢光崩溃草稿
+    // 并清空会话（与 planStartupWindows 注释的承诺相反；回归见 drafts.spec）
+    const cliFile = extractOpenableDocPath(process.argv);
+    const plan = cliFile
+      ? planStartupWindows(cliFile, [], [])
+      : planStartupWindows(null, consumeDrafts(), takeSession());
     const firstWin = createMainWindow();
     const [head, ...rest] = plan;
     if (head) {
-      registerPendingOpen(firstWin, head.path, head.content, head.restore);
+      registerPendingOpen(firstWin, head.path, {
+        content: head.content,
+        restore: head.restore,
+        recent: head.recent
+      });
     }
     for (const entry of rest) {
       const win = createMainWindow();
-      registerPendingOpen(win, entry.path, entry.content, entry.restore);
+      registerPendingOpen(win, entry.path, {
+        content: entry.content,
+        restore: entry.restore,
+        recent: entry.recent
+      });
     }
 
     setTimeout(() => checkForUpdates(true), UPDATE_CHECK_DELAY_MS);

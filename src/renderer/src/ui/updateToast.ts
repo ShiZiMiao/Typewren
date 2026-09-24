@@ -29,7 +29,9 @@ export class UpdateDownloadToast {
   private metaEl: HTMLElement;
   private cancelBtn: HTMLButtonElement;
   private hideTimer: number | undefined;
-  private unsubscribe: () => void;
+  /** 手动静默标志：用户点「✕ 关闭」后不再被 progress 顶开，
+   * 直到 done/canceled/error 的终态事件才解除并重新展示 */
+  private muted = false;
 
   constructor() {
     /* ---------- DOM ---------- */
@@ -80,22 +82,26 @@ export class UpdateDownloadToast {
     this.cancelBtn = cancelBtn;
 
     /* ---------- 交互 ---------- */
-    closeBtn.addEventListener('click', () => this.hide());
+    closeBtn.addEventListener('click', () => {
+      // 手动收起 = 静默：下载中的 progress 推送会不断刷新，无条件 show()
+      // 会把刚关掉的面板顶回来（"✕ 关闭点了没用"）——置 muted 直到终态
+      this.muted = true;
+      this.hide();
+    });
     cancelBtn.addEventListener('click', () => {
       // 立即本地收起，主进程随后推送 canceled 状态幂等覆盖
       window.typewren.cancelUpdateDownload();
       this.applyState({ phase: 'canceled' });
     });
 
-    /* ---------- 订阅主进程下载状态 ---------- */
-    this.unsubscribe = window.typewren.onUpdateDownloadState((state) => this.applyState(state));
+    /* ---------- 订阅主进程下载状态（提示卡常驻不销毁，无需退订） ---------- */
+    window.typewren.onUpdateDownloadState((state) => this.applyState(state));
   }
 
   /** 暴露给测试/调试：手动推送一个状态 */
   applyState(state: UpdateDownloadState): void {
     window.clearTimeout(this.hideTimer);
     this.hideTimer = undefined;
-    this.cancelBtn.style.display = '';
 
     switch (state.phase) {
       case 'starting':
@@ -103,20 +109,21 @@ export class UpdateDownloadToast {
         this.setBar(0, true);
         this.metaEl.textContent = '正在获取安装包…';
         this.cancelBtn.style.display = '';
-        this.show();
+        this.showUnlessMuted();
         break;
       case 'progress':
         this.titleEl.textContent = `正在下载更新 v${state.version}`;
         this.setBar(state.percent, state.percent <= 0);
         this.metaEl.textContent = `${state.percent}% · ${formatBytes(state.transferred)} / ${formatBytes(state.total)} · ${formatBytes(state.bytesPerSecond)}/s`;
         this.cancelBtn.style.display = '';
-        this.show();
+        this.showUnlessMuted();
         break;
       case 'done':
         this.titleEl.textContent = '更新已就绪';
         this.setBar(100, false);
         this.metaEl.textContent = `v${state.version} 下载完成，等待安装`;
         this.cancelBtn.style.display = 'none';
+        this.muted = false;
         this.show();
         this.autoHide();
         break;
@@ -125,6 +132,7 @@ export class UpdateDownloadToast {
         this.setBar(0, false);
         this.metaEl.textContent = '未安装任何更新';
         this.cancelBtn.style.display = 'none';
+        this.muted = false;
         this.show();
         this.autoHide();
         break;
@@ -133,6 +141,7 @@ export class UpdateDownloadToast {
         this.setBar(0, false);
         this.metaEl.textContent = state.message || '未知错误';
         this.cancelBtn.style.display = 'none';
+        this.muted = false;
         this.show();
         this.autoHide();
         break;
@@ -148,6 +157,12 @@ export class UpdateDownloadToast {
     this.panel.classList.remove('hidden');
   }
 
+  /** 下载中的状态更新不打断用户手动收起（muted 期间只更新数据不展示） */
+  private showUnlessMuted(): void {
+    if (this.muted) return;
+    this.show();
+  }
+
   private hide(): void {
     window.clearTimeout(this.hideTimer);
     this.hideTimer = undefined;
@@ -157,11 +172,5 @@ export class UpdateDownloadToast {
   private autoHide(): void {
     window.clearTimeout(this.hideTimer);
     this.hideTimer = window.setTimeout(() => this.hide(), AUTO_HIDE_MS);
-  }
-
-  dispose(): void {
-    this.unsubscribe();
-    this.hide();
-    this.panel.remove();
   }
 }

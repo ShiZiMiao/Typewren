@@ -28,7 +28,8 @@ export function fromLocalImageUrl(url: string): string | null {
   }
 }
 
-/** 是否为本地图片协议 URL（已解析过的引用，无需再解析） */
+/** 是否为本地图片协议 URL（已解析过的引用，无需再解析）。
+ *  渲染层 imageView.ts 用它跳过"已解析引用"的二次解析，须保持导出。 */
 export function isLocalImageUrl(url: string): boolean {
   return url.toLowerCase().startsWith(URL_PREFIX);
 }
@@ -36,20 +37,26 @@ export function isLocalImageUrl(url: string): boolean {
 const WINDOWS_ABSOLUTE = /^[A-Za-z]:[\\/]/;
 const HAS_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 
-/** dir 与 rel 的简单拼合（渲染层无 node:path；'..' 上跳、'./' 与空段忽略） */
-function joinPath(dir: string, rel: string): string {
+/**
+ * dir 与 rel 的简单拼合（渲染层无 node:path；'..' 上跳、'./' 与空段忽略）。
+ * 坑：直接 join 会丢 POSIX 根——'/home/u/doc'.split 得到的首段是空串（根标记），
+ * 被当空段丢掉后结果成 'home/u/doc/…'（非绝对路径，协议 400 拒，mac/Linux 下
+ * 相对引用图片全挂）。拼合后必须把前导 '/' 加回去（Windows 驱动器号 'D:' 不受影响）。
+ */
+export function joinPath(dir: string, rel: string): string {
   const segments = [...dir.split(/[\\/]+/), ...rel.split(/[\\/]+/)];
+  const rooted = dir.startsWith('/') || dir.startsWith('\\');
   const out: string[] = [];
   for (const seg of segments) {
     if (!seg || seg === '.') continue;
     if (seg === '..') {
-      // 保留驱动器号（'D:'），不往上层再弹
+      // 保留驱动器号（'D:'）/根层级，不往上层再弹
       if (out.length > 1) out.pop();
       continue;
     }
     out.push(seg);
   }
-  return out.join('/');
+  return (rooted ? '/' : '') + out.join('/');
 }
 
 /**

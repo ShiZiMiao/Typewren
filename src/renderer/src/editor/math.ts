@@ -19,7 +19,12 @@ import { escapeHtml } from '../util/escape';
 /** 挂载 remark-math 插件（解析仍由 remark 生态完成） */
 export const remarkMathPlugin = $remark('MATH_REMARK', () => remarkMath);
 
-function renderMath(value: string, displayMode: boolean): string {
+/**
+ * 渲染 KaTeX；出错时输出错误提示而非中断调用方。
+ * 编辑器 NodeView 与导出后处理（exportDocument）共用一份实现
+ * （两处各自写一遍时配置漂移过：displayMode/strict/output 必须一致）。
+ */
+export function renderMath(value: string, displayMode: boolean): string {
   try {
     return katex.renderToString(value, {
       displayMode,
@@ -123,6 +128,8 @@ class MathBlockView implements NodeView {
   dom: HTMLElement;
   renderEl: HTMLElement;
   editorEl: HTMLTextAreaElement;
+  /** 挂起的聚焦定时器（destroy 时清理） */
+  private focusTimer: number | undefined;
 
   constructor(
     private node: ProseNode,
@@ -182,7 +189,9 @@ class MathBlockView implements NodeView {
     this.editorEl.value = this.node.attrs.value as string;
     this.autoResize();
     // setTimeout 而非 rAF：无头/后台窗口 rAF 可能被节流，焦点必须随即生效
-    window.setTimeout(() => {
+    window.clearTimeout(this.focusTimer);
+    this.focusTimer = window.setTimeout(() => {
+      this.focusTimer = undefined;
       this.editorEl.focus();
       this.editorEl.setSelectionRange(this.editorEl.value.length, this.editorEl.value.length);
     }, 0);
@@ -211,6 +220,7 @@ class MathBlockView implements NodeView {
   }
 
   destroy(): void {
+    window.clearTimeout(this.focusTimer);
     this.dom.remove();
   }
 }
@@ -219,6 +229,8 @@ class MathInlineView implements NodeView {
   dom: HTMLElement;
   renderEl: HTMLElement;
   editorEl: HTMLInputElement;
+  /** 挂起的聚焦定时器（destroy 时清理） */
+  private focusTimer: number | undefined;
 
   constructor(
     private node: ProseNode,
@@ -273,7 +285,9 @@ class MathInlineView implements NodeView {
     this.editorEl.style.display = 'inline-block';
     this.editorEl.value = this.node.attrs.value as string;
     // setTimeout 而非 rAF：无头/后台窗口 rAF 可能被节流，焦点必须随即生效
-    window.setTimeout(() => {
+    window.clearTimeout(this.focusTimer);
+    this.focusTimer = window.setTimeout(() => {
+      this.focusTimer = undefined;
       this.editorEl.focus();
       this.editorEl.select();
     }, 0);
@@ -303,6 +317,7 @@ class MathInlineView implements NodeView {
   }
 
   destroy(): void {
+    window.clearTimeout(this.focusTimer);
     this.dom.remove();
   }
 }
@@ -319,7 +334,8 @@ export const mathInlineView = $view(mathInlineSchema.node, () => {
  * 输入规则
  * ------------------------------------------------------------ */
 
-/** 输入 `$latex$`（再敲任意键触发匹配）立即转为行内公式 */
+/** 输入 `$latex$` 立即转为行内公式——正则 `$` 锚点落在"块首到光标"的文本尾，
+ * 敲下收尾 `$` 这一键就触发匹配，无需再敲任意键 */
 export const inlineMathInputRule = $inputRule((ctx) => {
   return new InputRule(/\$([^$\n]+)\$$/, (state, match, start, end) => {
     const latex = match[1];

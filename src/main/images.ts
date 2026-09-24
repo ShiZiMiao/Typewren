@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol } from 'electron';
 import { constants as fsConstants, promises as fsp } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import { fromLocalImageUrl, IMAGE_URL_SCHEME } from '../shared/imageUrl';
 import type {
@@ -19,6 +19,7 @@ import {
   isImageSaveFromDataPayload,
   isImageSaveFromPathPayload
 } from '../shared/ipc';
+import { isTestMode } from './runMode';
 
 /* ============================================================
  * 图片粘贴 / 拖拽落盘（主进程侧）
@@ -46,12 +47,16 @@ function extFromMime(mime: string): string {
   return table[mime.split(';')[0].trim().toLowerCase()] ?? '.png';
 }
 
-/** URL 路径段扩展名（小写带点）；非图片扩展名返回空串 */
-function extFromUrlPath(pathname: string): string {
+/**
+ * URL 路径段扩展名（小写带点）；无扩展名或非图片扩展名返回 null。
+ * 坑：旧实现无命中返回 ''，`??` 兜底链不认空串（只认 null/undefined）→
+ * 文件以无扩展名落盘，typewren-img 协议按 isImagePath 拒载（403），图显示不出。
+ */
+export function extFromUrlPath(pathname: string): string | null {
   const dot = pathname.lastIndexOf('.');
-  if (dot < 0) return '';
+  if (dot < 0) return null;
   const ext = pathname.slice(dot).toLowerCase();
-  return (IMAGE_EXTENSIONS as readonly string[]).includes(ext) ? ext : '';
+  return (IMAGE_EXTENSIONS as readonly string[]).includes(ext) ? ext : null;
 }
 
 /** 嗅探二进制头部推断图片扩展名；无法识别返回 null */
@@ -80,6 +85,24 @@ function sniffImageExt(buffer: Buffer): string | null {
   }
   if (buffer.length >= 2 && buffer[0] === 0x42 && buffer[1] === 0x4d) {
     return '.bmp';
+  }
+  // ICO：00 00 01 00（reserved + type=1）；TIFF：'II*\0'（小端）/'MM\0*'（大端）。
+  // 嗅探口径与 IMAGE_EXTENSIONS 对齐——嗅探不认识的格式在准入处被拒（见下），
+  // 不补这两类会导致 .ico/.tif 插不进来
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0x00 &&
+    buffer[1] === 0x00 &&
+    buffer[2] === 0x01 &&
+    buffer[3] === 0x00
+  ) {
+    return '.ico';
+  }
+  if (buffer.length >= 4) {
+    const head4 = buffer.slice(0, 4).toString('latin1');
+    if (head4 === 'II*\u0000' || head4 === 'MM\u0000*') {
+      return head4.startsWith('II') ? '.tif' : '.tiff';
+    }
   }
   const head = buffer.slice(0, 1024).toString('utf8');
   if (head.includes('<svg')) return '.svg';
@@ -110,16 +133,27 @@ async function resolveDestDir(docPath: string | null): Promise<string> {
   return dir;
 }
 
-/** 把字节写入目标目录（唯一命名），返回绝对路径 */
+/** 把字节写入目标目录（唯一命名），返回绝对路径。
+ *  同一秒内时间戳相同、4 位随机数也同分（并发粘贴/批量插入）时会撞名——
+ *  用 flag 'wx' 独占创建：EEXIST 说明撞了已有图片，重新出名重试，
+ *  绝不覆盖（旧实现同名直接覆写，可能毁掉文档里已引用的图片）。 */
 async function writeImageBytes(
   docPath: string | null,
   buffer: Buffer,
   ext: string
 ): Promise<string> {
   const dir = await resolveDestDir(docPath);
-  const savedPath = join(dir, uniqueImageName(ext));
-  await fsp.writeFile(savedPath, buffer);
-  return savedPath;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const savedPath = join(dir, uniqueImageName(ext));
+    try {
+      await fsp.writeFile(savedPath, buffer, { flag: 'wx' });
+      return savedPath;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST') throw error;
+    }
+  }
+  throw new Error('图片命名冲突重试超限');
 }
 
 /** 校验 docPath 字段（可选：非 null 时必须是绝对路径，拒绝相对路径越权） */
@@ -133,6 +167,32 @@ function failResult(error: unknown): ImageSaveResult {
     ok: false,
     error: error instanceof Error ? error.message : String(error)
   };
+}
+
+/**
+ * SSRF 基础收紧：图片下载拒绝环回 / 私有网段 / 本机名（渲染层被攻破后拿
+ * image:download 探测内网、打到本机管理接口）。只做**字面**主机名判定
+ * （解析 DNS 后再判需要请求层拦截，此处不展开；redirect 也只看最终 URL）：
+ * 环回 127.* / ::1、私有 10.* / 192.168.* / 172.16-31.*、链路本地 169.254.*、
+ * 0.*（本网络）、localhost / *.localhost / *.local。
+ * 注：--test 下放行（imageDownload.spec 的模拟图片服务就跑在 127.0.0.1，
+ * 本地测试无公网回环替身），判定纯函数本身有单测兜底。
+ */
+export function isBlockedFetchHost(hostname: string): boolean {
+  // IPv6 字面量去方括号（URL.hostname 对 IPv6 保留 []）
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host.endsWith('.local')) return true;
+  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!ipv4) return false;
+  const a = Number(ipv4[1]);
+  const b = Number(ipv4[2]);
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 169 && b === 254) return true;
+  return false;
 }
 
 /** 扩展名 → Content-Type（协议响应头） */
@@ -207,12 +267,17 @@ export function registerImageHandlers(): void {
         if (!isImagePath(payload.srcPath)) {
           return failResult('不支持的图片格式');
         }
-        const buffer = await fsp.readFile(payload.srcPath);
-        if (buffer.length > MAX_IMAGE_BYTES) {
+        // 先 stat 预检大小再读盘：整读进内存才查上限，25GB 的"图片"会先把内存吃爆
+        const stat = await fsp.stat(payload.srcPath);
+        if (!stat.isFile()) return failResult('不是普通文件');
+        if (stat.size > MAX_IMAGE_BYTES) {
           return failResult('图片超过 25MB 限制');
         }
-        const originalExt = `.${basename(payload.srcPath).split('.').pop() ?? ''}`.toLowerCase();
-        const ext = sniffImageExt(buffer) ?? originalExt;
+        const buffer = await fsp.readFile(payload.srcPath);
+        // 头部嗅探为准，嗅不出来直接拒：旧实现回退用原扩展名放行，
+        // 任意字节改个 .png 后缀就能落盘（与"准入校验"的注释承诺不符）
+        const ext = sniffImageExt(buffer);
+        if (!ext) return failResult('不是有效图片');
         const savedPath = await writeImageBytes(payload.docPath, buffer, ext);
         return { ok: true, savedPath };
       } catch (error) {
@@ -232,11 +297,19 @@ export function registerImageHandlers(): void {
         if (payload.base64.length === 0) {
           return failResult('空图片数据');
         }
+        // 解码前按 base64 长度预检：Buffer.from 会先把整串解进内存（DoS 面）。
+        // 上限取 ≤MAX_IMAGE_BYTES 字节所能产出的最长 base64（ceil(n/3)*4，含 padding），
+        // 比裸 n*4/3 略宽几个字符——边界值（恰好 25MB 的图）不能被误杀
+        if (payload.base64.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4) {
+          return failResult('图片数据无效或超过 25MB 限制');
+        }
         const buffer = Buffer.from(payload.base64, 'base64');
         if (buffer.length === 0 || buffer.length > MAX_IMAGE_BYTES) {
           return failResult('图片数据无效或超过 25MB 限制');
         }
-        const ext = sniffImageExt(buffer) ?? extFromMime(payload.mime);
+        // 嗅探为准（mime 只是渲染层自报，不可信），嗅不出直接拒
+        const ext = sniffImageExt(buffer);
+        if (!ext) return failResult('不是有效图片');
         const savedPath = await writeImageBytes(payload.docPath, buffer, ext);
         return { ok: true, savedPath };
       } catch (error) {
@@ -259,6 +332,11 @@ export function registerImageHandlers(): void {
         if (url.protocol !== 'http:' && url.protocol !== 'https:') {
           return failResult('仅支持 http/https 图片地址');
         }
+        // SSRF 基础收紧：环回/私有字面 IP 与本机名一律拒（--test 放行，
+        // e2e 的 mock 图片服务就在 127.0.0.1；纯函数有单测）
+        if (!isTestMode() && isBlockedFetchHost(url.hostname)) {
+          return failResult('不支持本地/内网图片地址');
+        }
         const response = await fetch(url, {
           redirect: 'follow',
           signal: controller.signal
@@ -275,24 +353,36 @@ export function registerImageHandlers(): void {
         }
 
         // 流式接收 + 边收边限上限，避免整块进内存后再检查。
-        // 超限后 break 正常收尾（不要在此 abort：流取消异常会被误报为超时）
+        // 超限后 break 正常收尾（不要在此 abort：流取消异常会被误报为超时）。
+        // 用 getReader 逐块读而非 for-await：web/undici 两套 ReadableStream 类型
+        // 只有一套带 Symbol.asyncIterator（tsconfig.test 的 DOM lib 下 for-await 编译报错）
         const chunks: Buffer[] = [];
         let received = 0;
         let oversized = false;
-        if (response.body) {
-          for await (const chunk of response.body) {
+        const body = response.body;
+        if (body) {
+          const reader = body.getReader();
+          for (;;) {
+            const result = await reader.read();
+            if (result.done) break;
+            const chunk = Buffer.from(result.value);
             received += chunk.length;
             if (received > MAX_IMAGE_BYTES) {
               oversized = true;
+              // 主动取消剩余流（少收一点是一点）；取消失败不影响结果
+              await reader.cancel().catch(() => {});
               break;
             }
-            chunks.push(Buffer.from(chunk));
+            chunks.push(chunk);
           }
         }
         if (oversized) return failResult('图片超过 25MB 限制');
         const buffer = Buffer.concat(chunks);
         if (buffer.length === 0) return failResult('下载内容为空');
 
+        // 扩展名兜底链：嗅探 → URL 路径段 → Content-Type。
+        // extFromUrlPath 无命中必须返回 null（空串会让 ?? 链断掉，
+        // 文件以无扩展名落盘后 typewren-img 协议 403 显示不出）
         const ext =
           sniffImageExt(buffer) ?? extFromUrlPath(url.pathname) ?? extFromMime(contentType);
         const savedPath = await writeImageBytes(payload.docPath, buffer, ext);

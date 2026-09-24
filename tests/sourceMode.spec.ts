@@ -9,6 +9,7 @@ import {
   sendCommand,
   installDialogStubs,
   setDialog,
+  readSource,
   type AppHandle
 } from './helpers';
 
@@ -94,7 +95,7 @@ test.describe('源码模式', () => {
     await app.window.locator('#source-textarea').fill('# 源码保存\n\n段落');
     await app.window.waitForTimeout(300);
 
-    setDialog(app, { saveAs: SAVE_PATH });
+    await setDialog(app, { saveAs: SAVE_PATH });
     await sendCommand(app, 'save');
     await expect
       .poll(() => (existsSync(SAVE_PATH) ? readFileSync(SAVE_PATH, 'utf-8') : null))
@@ -179,7 +180,7 @@ test.describe('源码模式', () => {
     await loadContent(app, content);
     await setSourceMode(true);
 
-    setDialog(app, { saveAs: SAVE_PATH });
+    await setDialog(app, { saveAs: SAVE_PATH });
     await sendCommand(app, 'save');
     await expect
       .poll(() => (existsSync(SAVE_PATH) ? readFileSync(SAVE_PATH, 'utf-8') : null))
@@ -369,5 +370,87 @@ test.describe('源码模式', () => {
         })
       )
       .toBe('第三段内容用于定位。');
+  });
+});
+
+// ========== 回归 ==========
+
+test.describe('回归：源码模式真实回车（contenteditable 拆块）', () => {
+  test('真实 Enter 换行在 getText/保存里保留', async () => {
+    await loadContent(app, '第一行内容', '');
+    await setSourceMode(true);
+
+    // 全程操作**真实**的 #source-textarea——历史上这里换过 plaintext-only
+    // 克隆体做探针实验（断言的不是被测元素，等于没测），回归必须打真元素
+    const ta = app.window.locator('#source-textarea');
+    await ta.click();
+    // 光标挪到行尾（DOM 选区；无头环境下 End/方向键不保证生效）
+    await app.window.evaluate(() => {
+      const el = document.querySelector('#source-textarea') as HTMLElement;
+      const sel = window.getSelection()!;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+
+    // 真实回车 + 真实打字（Enter 未被拦截时：Blink 默认 insertParagraph 把
+    // contenteditable 拆成 <div>/<br> 结构，块边界换行从 textContent 消失——
+    // 脏检测/保存/退出全基于 textContent，换行会整个丢失）
+    await app.window.keyboard.press('Enter');
+    await app.window.keyboard.type('第二行内容');
+    await app.window.waitForTimeout(300);
+
+    // getText（readSource 与 getText 同为 textContent）里 '\n' 必须以
+    // 文本节点字符形态被保留，而不是被拆块吞掉
+    expect(await readSource(app)).toBe('第一行内容\n第二行内容');
+
+    // 无块级元素：insertParagraph 的 <div>/<br> 产物不得出现
+    //（语法高亮走 CSS.highlights 区间着色不动 DOM，innerHTML 里只应有文本节点）
+    const html = await app.window.locator('#source-textarea').innerHTML();
+    expect(html).not.toContain('<div');
+    expect(html).not.toContain('<br');
+
+    // 保存回归：写盘内容的换行与源码视图一致
+    await setDialog(app, { saveAs: SAVE_PATH });
+    await sendCommand(app, 'save');
+    await expect
+      .poll(() => (existsSync(SAVE_PATH) ? readFileSync(SAVE_PATH, 'utf-8') : null))
+      .toContain('第一行内容\n第二行内容');
+
+    await setSourceMode(false);
+  });
+});
+
+test.describe('回归：内容区缩放下渲染→源码定位（屏幕/局部单位混用）', () => {
+  test('zoom 120% 切源码：光标行顶部对齐不偏移', async () => {
+    // 内容区缩放到 120%（步进 10 个百分点 ×2）
+    await sendCommand(app, 'view:zoom-in');
+    await sendCommand(app, 'view:zoom-in');
+
+    const paragraphs = Array.from({ length: 30 }, (_, i) => `第${i + 1}段内容用于长文档定位测试。`);
+    await loadContent(app, `${paragraphs.join('\n\n')}\n`);
+    await app.window.locator('.ProseMirror p').nth(9).click();
+    await app.window.waitForTimeout(150);
+
+    await setSourceMode(true);
+
+    // 光标行应顶到源码区顶部：滚动目标 = scrollTop + rect 差值 ÷ zoom
+    // （rect 差值是屏幕像素、scrollTop 是局部单位；旧行直接相加，
+    // zoom≠100% 时过冲 (zoom-1)×偏移——长文档下光标被顶出视口顶部）
+    const topGap = await app.window.evaluate(() => {
+      const el = document.getElementById('source-textarea');
+      const sel = window.getSelection();
+      if (!el || !sel || sel.rangeCount === 0) return -1;
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      return rect.top - el.getBoundingClientRect().top;
+    });
+    expect(topGap).toBeGreaterThanOrEqual(-2);
+    expect(topGap).toBeLessThan(60);
+
+    await setSourceMode(false);
+    // 恢复缩放，避免影响后续用例
+    await sendCommand(app, 'view:zoom-reset');
   });
 });

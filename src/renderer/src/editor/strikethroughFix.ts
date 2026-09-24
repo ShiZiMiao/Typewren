@@ -19,14 +19,35 @@ import type { Ctx } from '@milkdown/kit/ctx';
  *   修复：覆盖 text handler——先去转义，再用编辑器同源解析器把候选文本
  *   解析回去，只有“重解析仍是同一个文本节点”时才原样输出；否则（字面
  *   强调 _a_、行首 # 等会被误读为语法的文本）才退回 safe() 的转义结果。
- *   escapeTracking.relaxed 供 getMarkdown 决定是否做整篇回读校验。
+ *   esc.relaxed 供 getMarkdown 决定是否做整篇回读校验。
  */
 
-/** 序列化模式开关：strict 走默认 safe()（整篇兜底用），relaxed 尽力去转义 */
-export const escapeTracking = {
-  strict: false,
-  relaxed: false
-};
+/**
+ * 单次序列化的转义跟踪上下文。
+ * 不再用模块级可变全局（getMarkdown 与回读重序列化共用一份标志时不可重入）：
+ * 每次序列化调用经 withEscapeTracking 新建一份上下文并动态绑定，
+ * 嵌套/交叠的调用各自独立（保存旧绑定、退出恢复）。
+ * text handler 只能经序列化管线深层回调拿到 state，无法直接传参，
+ * 故用“当前上下文”槽位承载——但对象本身随调用成对创建/销毁。
+ */
+export interface EscapeContext {
+  strict: boolean;
+  relaxed: boolean;
+}
+
+let currentEscape: EscapeContext | null = null;
+
+/** 在独立转义上下文内执行一次序列化（回调内可读写 esc 标志） */
+export function withEscapeTracking<T>(run: (esc: EscapeContext) => T): T {
+  const saved = currentEscape;
+  const esc: EscapeContext = { strict: false, relaxed: false };
+  currentEscape = esc;
+  try {
+    return run(esc);
+  } finally {
+    currentEscape = saved;
+  }
+}
 
 /**
  * 用解析器把文本解析为单个文本节点时返回其内容，否则返回 null。
@@ -121,8 +142,9 @@ export function applyStrikethroughFixes(ctx: Ctx): void {
         const raw = String((node as { value?: unknown }).value ?? '');
         if (raw === '') return '';
 
-        // 整篇兜底：严格模式直接走默认 safe()
-        if (escapeTracking.strict) return state.safe(raw, info);
+        // 未绑定上下文（其它 stringify 路径）或整篇兜底：严格模式走默认 safe()
+        const esc = currentEscape;
+        if (!esc || esc.strict) return state.safe(raw, info);
 
         const safeOut = state.safe(raw, info);
         // 没有转义时无需处理（最常见的路径）
@@ -130,7 +152,7 @@ export function applyStrikethroughFixes(ctx: Ctx): void {
 
         // 去掉全部转义后，若编辑器同源解析器仍解析为同一个文本节点 → 原样输出
         if (parseAsSingleText(getParser, raw) === raw) {
-          escapeTracking.relaxed = true;
+          esc.relaxed = true;
           return raw;
         }
 

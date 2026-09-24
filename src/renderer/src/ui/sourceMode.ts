@@ -2,7 +2,7 @@ import type { Editor } from '@milkdown/kit/core';
 
 import { setMarkdown } from '../editor/actions';
 import type { FileService } from '../services/fileService';
-import { insertTextViaInputEvent } from '../util/inputEvent';
+import { insertTextViaInputEvent, syncTrailingBreak } from '../util/inputEvent';
 import {
   anchorToSourceCaret,
   captureEditorAnchor,
@@ -51,6 +51,9 @@ export class SourceModeController {
   ) {
     // 源码编辑 → 脏检测 + 状态栏刷新
     this.sourceEl.addEventListener('input', () => {
+      // 尾锚自愈：删除/改写可能让末字符在 '\n'/非 '\n' 间翻转（Blink 打字时
+      // 会自行消费 <br> 尾锚），不重同步会出现"不可见的末尾空行"或锚残留
+      syncTrailingBreak(this.sourceEl);
       this.fileService.handleDocUpdated();
       this.scheduleHighlight();
       this.onStateChange();
@@ -63,11 +66,36 @@ export class SourceModeController {
         this.notifyCaretMove();
       });
     }
-    // Tab 键插入制表符而非移动焦点（与渲染模式 tabKey 插件行为一致）
+    // Tab 键插入制表符而非移动焦点（与渲染模式 tabKey 插件行为一致）；
+    // Enter 同理拦截（结论见下）。都走 util/inputEvent 的 insertText 链路
     this.sourceEl.addEventListener('keydown', (event) => {
       if (event.key === 'Tab') {
         event.preventDefault();
         insertTextViaInputEvent(this.sourceEl, '\t');
+        this.fileService.handleDocUpdated();
+        this.onStateChange();
+        this.notifyCaretMove();
+      } else if (event.key === 'Enter' && !event.isComposing) {
+        // 【实测结论（tests/sourceMode.spec「真实 Enter 换行在 getText/保存里保留」
+        // 红绿已验证：红 = 放行默认 insertParagraph 即拆块丢换行），勿回退】
+        // 源码区是 contenteditable div，真实回车的 Blink 默认动作 insertParagraph
+        // 会把内容拆成 <div>/<br> 块结构，而 getText/脏检测/保存/退出写回全基于
+        // textContent——块边界换行从 textContent 直接消失（实测：
+        // `第一行内容\n第二行内容` 打成 `第一行内容<div>第二行内容</div>`，
+        // textContent 即 `第一行内容第二行内容`，保存丢换行）。
+        // 方案：拦 Enter 走 insertTextViaInputEvent('\n')——含换行文本在
+        // util/inputEvent 内部走 execCommand('insertHTML') 兜底落成**文本节点换行**
+        // （#source-textarea 是 pre-wrap；insertText 对 '\n' 是分块语义，
+        // 见 inputEvent.ts 注释）。
+        // 【文末回车二段坑（同 spec 红绿已验证）】'\n' 落在文末时"其后"光标位
+        // 无布局落点（caret rect 为 (0,0)、打字跳回 '\n' 前），insertTextViaInputEvent
+        // 内部以 <br> 尾锚补出空行落点——<br> 不进 textContent，换行语义仍是
+        // '\n' 字符，打字落位后锚被 Blink 自行消费（input 里 syncTrailingBreak 自愈）。
+        // 未选 contenteditable="plaintext-only"——其 Enter 仍可能产出 <br>/块结构，
+        // 且高亮 TreeWalker/插入管线未按纯文本模式验证过。
+        // isComposing 时放行：输入法组合中的 Enter 是"确认上屏"，不能拦。
+        event.preventDefault();
+        insertTextViaInputEvent(this.sourceEl, '\n');
         this.fileService.handleDocUpdated();
         this.onStateChange();
         this.notifyCaretMove();
@@ -94,6 +122,8 @@ export class SourceModeController {
   /** 设置纯文本内容 */
   private setContent(text: string): void {
     this.sourceEl.textContent = text;
+    // 直接落 textContent 不会带尾锚：文档以 '\n' 结尾时立即补，光标才有落点
+    syncTrailingBreak(this.sourceEl);
     this.refreshHighlight();
   }
 
@@ -172,11 +202,14 @@ export class SourceModeController {
     window.setTimeout(() => {
       const anchor = this.pendingEditorAnchor;
       this.pendingEditorAnchor = null;
+      // 顺序敏感：先判 active 再 focus——用户在这一拍里已切回渲染视图时，
+      // 抢焦点给已隐藏的源码区会把焦点从编辑器偷走（旧实现 focus 在判断之前）
+      if (!this.active) return;
       this.sourceEl.focus();
-      if (!this.active || !anchor) return;
+      if (!anchor) return;
       const caret = anchorToSourceCaret(this.getText(), anchor);
       // 顶部对齐（与渲染模式跳转一致）+ 瞬时定位（避免从文档顶部滑过来的动画）
-      if (caret !== null) placeSourceCaret(this.sourceEl, caret, 'top', 'auto');
+      placeSourceCaret(this.sourceEl, caret, 'top', 'auto');
     }, 0);
     this.onStateChange();
   }
@@ -190,9 +223,10 @@ export class SourceModeController {
     // 退出前记录源码锚点：write back 后把渲染光标放回同一处
     const caret = this.getCursorPos();
     const lines = sourceLines(value);
+    const lineIndex = lineAt(lines, caret);
     this.pendingSourceAnchor = {
-      lineText: lines[lineAt(lines, caret)]?.content ?? '',
-      lineIndex: lineAt(lines, caret),
+      lineText: lines[lineIndex]?.content ?? '',
+      lineIndex,
       lineCount: lines.length
     };
 

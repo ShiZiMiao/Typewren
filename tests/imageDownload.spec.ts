@@ -29,9 +29,16 @@ test.beforeAll(async () => {
 
   server = createServer((req, res) => {
     const url = req.url ?? '';
-    if (url === '/ok.png' || url === '/oa-without-ext') {
+    if (url === '/ok.png' || url === '/no-ext') {
       res.writeHead(200, { 'content-type': 'image/png' });
       res.end(PNG_BYTES);
+      return;
+    }
+    if (url === '/no-ext-plain') {
+      // 无可嗅探的图片魔数：扩展名必须走 URL 路径段 → Content-Type 兜底链
+      // （覆盖 extFromUrlPath 无命中返回空串、?? 链断掉落盘无扩展名的坑）
+      res.writeHead(200, { 'content-type': 'image/png' });
+      res.end('PLAIN-BYTES-NOT-A-REAL-IMAGE');
       return;
     }
     if (url === '/not-image') {
@@ -92,9 +99,19 @@ test.describe('网络图片下载', () => {
     expect(readFileSync(savedPath).slice(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
   });
 
-  test('无扩展名但 content-type 为图片可下载', async () => {
-    const res = await callDownload(`${baseUrl}/oa-without-ext`);
+  test('无扩展名 URL 下载得到 .png 文件', async () => {
+    const res = await callDownload(`${baseUrl}/no-ext`);
     expect(res.ok).toBe(true);
+    // 无扩展名 URL + 可嗅探 PNG：落盘扩展名取嗅探结果
+    expect(res.savedPath!.toLowerCase().endsWith('.png')).toBe(true);
+  });
+
+  test('无扩展名且无可嗅探魔数：扩展名兜底到 Content-Type，不得落盘成无扩展名', async () => {
+    const res = await callDownload(`${baseUrl}/no-ext-plain`);
+    expect(res.ok).toBe(true);
+    // extFromUrlPath 无命中必须返回 null 让 ?? 链走到 extFromMime——
+    // 返回空串会让文件以无扩展名落盘，typewren-img 协议 403 显示不出
+    expect(res.savedPath!.toLowerCase().endsWith('.png')).toBe(true);
   });
 
   test('HTTP 404 返回失败', async () => {

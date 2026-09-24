@@ -1,6 +1,8 @@
 import type { Editor } from '@milkdown/kit/core';
 import { editorViewCtx } from '@milkdown/kit/core';
 
+import { localStore } from '../util/storage';
+
 /* ============================================================
  * 拼写检查开关（设置收口：settings.json 权威，localStorage 镜像兼容测试预置）：
  * - 渲染层切换编辑器 contenteditable 的 spellcheck 属性（随编辑框启用）；
@@ -18,7 +20,7 @@ export class SpellcheckController {
     private readonly editor: Editor,
     initial: boolean
   ) {
-    const stored = localStorage.getItem(SPELLCHECK_KEY);
+    const stored = localStore.get(SPELLCHECK_KEY);
     this.enabled = stored !== null ? stored === '1' : initial;
     this.applyDom();
   }
@@ -35,7 +37,7 @@ export class SpellcheckController {
   setEnabled(enabled: boolean): void {
     if (this.enabled === enabled) return;
     this.enabled = enabled;
-    localStorage.setItem(SPELLCHECK_KEY, enabled ? '1' : '0');
+    localStore.set(SPELLCHECK_KEY, enabled ? '1' : '0');
     this.applyDom();
   }
 

@@ -137,26 +137,6 @@
   border-bottom-color: var(--accent);
 }
 
-/* 收起按钮（右下角 ‹/›，Typora 式） */
-.side-collapse {
-  flex-shrink: 0;
-  align-self: flex-end;
-  border: none;
-  background: transparent;
-  color: var(--text-faint);
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  padding: 6px 10px;
-  margin: 2px 6px 2px 0;
-  border-radius: 6px;
-}
-
-.side-collapse:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
 #outline-tree {
   flex: 1;
   overflow-y: auto;
@@ -221,6 +201,13 @@
 }
 
 /* ---------- 编辑区 ---------- */
+/* 内容区缩放：只缩放编辑/源码区域的显示，UI 骨架不动（AGENTS.md 决策 #20）。
+ * CSS zoom 只缩放内部内容、盒子仍占原布局槽位，勿对 width/max-width 反向补偿。 */
+#editor-container,
+#source-textarea {
+  zoom: var(--content-zoom, 1);
+}
+
 #editor-container {
   flex: 1;
   min-width: 0;
@@ -349,8 +336,7 @@
 #source-textarea::highlight(typewren-source-regexp),
 #source-textarea::highlight(typewren-source-symbol),
 #source-textarea::highlight(typewren-source-type),
-#source-textarea::highlight(typewren-source-punctuation),
-#source-textarea::highlight(typewren-source-formula) {
+#source-textarea::highlight(typewren-source-punctuation) {
   color: var(--text-muted);
 }
 

@@ -11,6 +11,7 @@ export default defineConfig({
   workers: 1,
   reporter: 'list',
   use: {
-    trace: 'on-first-retry'
+    // retries=0 下 on-first-retry 永不采集，失败现场无 trace 可查
+    trace: 'retain-on-failure'
   }
 });

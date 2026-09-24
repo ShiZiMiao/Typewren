@@ -42,6 +42,17 @@ const LEGACY_POSITIONS: Record<string, string> = {
 
 const isPercentPosition = (value: string): boolean => /^-?\d+(\.\d+)?% -?\d+(\.\d+)?%$/.test(value);
 
+/** 图片引用 → CSS url() 值。
+ * Windows 路径先转正斜杠（`C:\img\a.png` 反斜杠在 CSS 串里是转义符），
+ * 再按 CSS 字符串转义 `"` 与 `\`，最终用**双引号**包裹——旧实现
+ * `url('${imageUrl}')` 未转义：URL 含 ' 或 \ 即截断/破坏整条声明
+ * （data URI 里常见 '，粘贴的路径里常见 \）。 */
+function cssUrlValue(imageUrl: string): string {
+  const normalized = imageUrl.replace(/\\/g, '/');
+  const escaped = normalized.replace(/(["\\])/g, '\\$1');
+  return `url("${escaped}")`;
+}
+
 export class BackgroundSettingsController {
   private settings: BackgroundSettings;
   private panel: HTMLElement | null = null;
@@ -97,7 +108,13 @@ export class BackgroundSettingsController {
   }
 
   private saveSettings(): void {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.settings));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.settings));
+    } catch {
+      // 配额满（大图 data URI 超 5MB 配额是常态）/存储被禁：不抛——
+      // 抛了会让本次交互中断且设置永不持久；降级提示可见于预览框
+      if (this.dragHint) this.dragHint.textContent = '设置无法持久保存（本地存储已满）';
+    }
   }
 
   private applySettings(): void {
@@ -105,7 +122,7 @@ export class BackgroundSettingsController {
     const app = document.getElementById('app');
 
     if (this.settings.imageUrl) {
-      root.style.setProperty('--bg-image-url', `url('${this.settings.imageUrl}')`);
+      root.style.setProperty('--bg-image-url', cssUrlValue(this.settings.imageUrl));
       root.style.setProperty('--bg-image-opacity', String(this.settings.opacity));
       root.style.setProperty('--bg-image-blur', `${this.settings.blur}px`);
       root.style.setProperty('--bg-image-size', this.effectiveBackgroundSize());
@@ -436,7 +453,14 @@ export class BackgroundSettingsController {
     img.addEventListener('pointerdown', (e) => {
       if (!this.dragOffsets || e.button !== 0) return;
       e.preventDefault();
-      img.setPointerCapture(e.pointerId);
+      // setPointerCapture 对无效/合成 pointerId 抛 NotFoundError——放在装配
+      // 首行会让整个拖动链路中断（监听器根本不挂）。捕获只是"移出元素仍收
+      // move"的增强，失败可降级：图内拖动走冒泡不受影响
+      try {
+        img.setPointerCapture(e.pointerId);
+      } catch {
+        // 无捕获继续装配
+      }
       img.classList.add('dragging');
       const startLeft = this.dragOffsets.left;
       const startTop = this.dragOffsets.top;
@@ -451,7 +475,10 @@ export class BackgroundSettingsController {
         this.setDragOffset(left, top, true);
       };
       const onUp = (ev: PointerEvent) => {
-        img.releasePointerCapture(ev.pointerId);
+        // pointercancel 路径捕获常已被隐式释放，releasePointerCapture 会抛
+        // NotFoundError——抛在 saveSettings 之前就**静默丢持久化**且漏摘监听
+        //（拖完不落盘、下次拖动双倍位移），必须先判捕获仍在再释放
+        if (img.hasPointerCapture(ev.pointerId)) img.releasePointerCapture(ev.pointerId);
         img.classList.remove('dragging');
         img.removeEventListener('pointermove', onMove);
         img.removeEventListener('pointerup', onUp);
@@ -567,9 +594,13 @@ export class BackgroundSettingsController {
       return;
     }
     const probe = new Image();
+    // 过期回包判定基准：probe.src 是**解析后的绝对 URL**（相对/Windows 路径
+    // 输入时与原串恒不等），必须拿加载前捕获的期望值比对——旧实现
+    // `probe.src !== this.settings.imageUrl` 恒真，预览永不装配
+    const expected = url;
     probe.onload = () => {
       // 防止快速切换 URL 时旧回包覆盖
-      if (probe.src !== this.settings.imageUrl) return;
+      if (expected !== this.settings.imageUrl) return;
       this.imgNatural = {
         w: probe.naturalWidth || probe.width,
         h: probe.naturalHeight || probe.height

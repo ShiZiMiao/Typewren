@@ -97,6 +97,12 @@ test.describe('背景图片-拖动选择显示区域', () => {
   });
 
   test('拖动预览图选择区域并同步编辑器与持久化', async () => {
+    // 无头窗口下每次 mouse.move 派发实测固定 ~5s（隐藏窗口 hit-test/帧同步税，
+    // 与 wheel ~2s 同族），拖动链路含 4~5 次派发，30s 默认预算会被随机
+    // 慢派发挤爆——超时中断后 pending 的 mouse.move 直到 afterAll closeApp
+    // 才以 "Target page ... has been closed" 二次报错，掩盖真实原因（trace 实证：
+    // 崩溃/死循环均不存在，页面全程存活，是派发没跑完）
+    test.setTimeout(60000);
     await setBackground();
     await openPanel();
 
@@ -115,7 +121,10 @@ test.describe('背景图片-拖动选择显示区域', () => {
     const dy = 40; // 向下拖 40px
     await app.window.mouse.move(cx, cy);
     await app.window.mouse.down();
-    await app.window.mouse.move(cx, cy + dy, { steps: 4 });
+    // 单步到位：onMove 以拖动起点为基准算绝对增量（start + ev - start_ev），
+    // 中间插值点纯装饰；而 steps:N = N 次独立派发（每次 ~5s），
+    // 正是本用例曾 30s 超时的直接原因
+    await app.window.mouse.move(cx, cy + dy);
     await app.window.mouse.up();
 
     const s1 = await readDragState();
@@ -184,6 +193,9 @@ test.describe('背景图片-拖动选择显示区域', () => {
   });
 
   test('重载后拖动位置保留且预览图按百分比还原', async () => {
+    // 与「拖动预览图选择区域」同款预算保护：两次 reload + 两次 openPanel
+    // （各含一次 ~5s 的 hover 建立派发）+ 拖动 3 次派发，慢机器上贴近 30s
+    test.setTimeout(60000);
     await setBackground();
     await openPanel();
     const img = app.window.locator('.bg-settings-drag-img');
@@ -195,7 +207,7 @@ test.describe('背景图片-拖动选择显示区域', () => {
     const cy = boxBox!.y + boxBox!.height / 2;
     await app.window.mouse.move(cx, cy);
     await app.window.mouse.down();
-    await app.window.mouse.move(cx, cy + 40, { steps: 4 });
+    await app.window.mouse.move(cx, cy + 40);
     await app.window.mouse.up();
 
     const before = await readDragState();

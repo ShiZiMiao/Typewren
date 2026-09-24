@@ -152,6 +152,7 @@ class CodeBlockView implements NodeView {
 
   destroy(): void {
     if (this.detectTimer !== null) window.clearTimeout(this.detectTimer);
+    if (this.focusTimer !== null) window.clearTimeout(this.focusTimer);
     if (this.onDocMouseDown) document.removeEventListener('mousedown', this.onDocMouseDown, true);
     if (this.onViewportChange) {
       window.removeEventListener('scroll', this.onViewportChange, true);
@@ -229,6 +230,8 @@ class CodeBlockView implements NodeView {
   private listUserTyped = false;
   private onDocMouseDown: ((e: MouseEvent) => void) | null = null;
   private onViewportChange: (() => void) | null = null;
+  /** 挂起的就地编辑器聚焦定时器（close/destroy 时清理） */
+  private focusTimer: number | null = null;
 
   private openLanguageEditor(defaultValue: string): void {
     if (this.editorInput) return;
@@ -294,10 +297,13 @@ class CodeBlockView implements NodeView {
     };
     document.addEventListener('mousedown', this.onDocMouseDown, true);
 
-    requestAnimationFrame(() => {
+    // setTimeout 而非 rAF：无头/后台窗口 rAF 可能被节流，焦点必须随即生效；
+    // 句柄留存供 closeLanguageEditor/destroy 清理（挂起的聚焦不得在收起后触发）
+    this.focusTimer = window.setTimeout(() => {
+      this.focusTimer = null;
       input.focus();
       input.select();
-    });
+    }, 0);
   }
 
   private applyLanguage(value: string): void {
@@ -306,6 +312,10 @@ class CodeBlockView implements NodeView {
   }
 
   private closeLanguageEditor(): void {
+    if (this.focusTimer !== null) {
+      window.clearTimeout(this.focusTimer);
+      this.focusTimer = null;
+    }
     if (this.onDocMouseDown) document.removeEventListener('mousedown', this.onDocMouseDown, true);
     this.onDocMouseDown = null;
     if (this.onViewportChange) {

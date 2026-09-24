@@ -46,8 +46,26 @@ function isSafeToOpen(prev: string | undefined, next: string | undefined): boole
   return safe(prev) && safe(next);
 }
 
+/**
+ * 选区是否可安全"压平包裹"：同一 textblock 内且不含非文本行内节点。
+ * wrapSelection 用 textBetween 把选区压成纯文本再整段替换——选区里若有
+ * 图片/行内公式/硬换行等原子节点会被直接销毁；跨段落则替换会拆结构。
+ * 不满足时放弃补全（交回默认输入），不猜测包裹结果。
+ */
+function canWrapSelection(state: EditorState): boolean {
+  const { from, to, $from, $to } = state.selection;
+  if ($from.depth === 0 || !$from.sameParent($to)) return false;
+  let pureText = true;
+  state.doc.nodesBetween(from, to, (node) => {
+    if (node.isInline && !node.isText) pureText = false;
+  });
+  return pureText;
+}
+
 export class AutoPairsController {
   private enabled: boolean;
+  /** beforeinput 监听的卸载句柄（捕获阶段注册，dispose 时成对摘除） */
+  private readonly abort = new AbortController();
 
   constructor(
     private readonly editor: Editor,
@@ -59,8 +77,16 @@ export class AutoPairsController {
     editor.action((ctx) => {
       const view = ctx.get(editorViewCtx);
       // 捕获阶段注册：必须先于 ProseMirror 的 beforeinput 处理
-      view.dom.addEventListener('beforeinput', this.handleBeforeInput, true);
+      view.dom.addEventListener('beforeinput', this.handleBeforeInput, {
+        capture: true,
+        signal: this.abort.signal
+      });
     });
+  }
+
+  /** 清理事件监听（编辑器销毁/重建时由装配方调用） */
+  dispose(): void {
+    this.abort.abort();
   }
 
   get isEnabled(): boolean {
@@ -113,8 +139,10 @@ export class AutoPairsController {
 
     const { from, to } = state.selection;
 
-    // 1) 有选区：包裹
+    // 1) 有选区：包裹（仅同段落纯文本选区；含原子节点时放弃补全，
+    // 防 textBetween 压平重建把图片/公式销毁——见 canWrapSelection）
     if (from !== to) {
+      if (!canWrapSelection(state)) return;
       event.preventDefault();
       this.wrapSelection(view, ch);
       return;

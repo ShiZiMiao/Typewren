@@ -60,7 +60,15 @@ function clamp(value: number, min: number, max: number, fallback: number): numbe
 }
 
 function num(value: unknown, fallback: number): number {
-  return typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : fallback;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    // 空串/空白串经 Number('') 会变 0（输入框被清空后回写即此场景），
+    // 应视为"未填"回落默认值，而不是把字号/行距钳到下限
+    const trimmed = value.trim();
+    if (trimmed === '') return fallback;
+    return Number(trimmed);
+  }
+  return fallback;
 }
 
 function bool(value: unknown, fallback: boolean): boolean {

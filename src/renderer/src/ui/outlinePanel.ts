@@ -3,11 +3,16 @@ import { editorViewCtx } from '@milkdown/kit/core';
 import { TextSelection } from '@milkdown/kit/prose/state';
 
 import { setSourceCaret, sourceLines, stripMarkup } from './positionSync';
+import { screenPxToLocal } from './zoom';
 
 /** 滚动联动阈值：标题行顶距视口顶 8px 内视为“位于顶部” */
 const SCROLL_ACTIVE_THRESHOLD_PX = 8;
 /** 大纲跳转平滑滚动兜底：scrollend 未触发时的最大等待（选段落回时长） */
 const SCROLL_ANIMATION_TIMEOUT_MS = 800;
+/** 源码模式"视口顶行"取样的 x 偏移：文本起点在 56px 左 padding 之后
+ * （layout.css #source-textarea 的 padding-left），+60 保证命中正文行
+ * 而非 padding 空白（caretRangeFromPoint 落空时返回 null 直接放弃联动） */
+const SOURCE_LINE_HIT_X_PX = 60;
 
 export interface OutlineEntry {
   level: number;
@@ -34,7 +39,9 @@ function collectHeadings(editor: Editor): (OutlineEntry & { pos: number })[] {
       if (node.type.name === 'heading') {
         entries.push({
           level: Number(node.attrs.level),
-          text: node.textContent.trim() || `标题 ${entries.length + 1}`,
+          // 空标题保持空串（显示兜底见 outlineLabel）：兜底文案 '标题 N'
+          // 永不等于源码行的空内容，曾让空标题的源码跳转匹配静默失败
+          text: node.textContent.trim(),
           pos,
           index: entries.length
         });
@@ -46,10 +53,10 @@ function collectHeadings(editor: Editor): (OutlineEntry & { pos: number })[] {
   return entries;
 }
 
-/**
- * 标题行匹配用的文本剥离：与 positionSync.stripMarkup 同一份共享实现
- * （详见其文档注释：只删成对语法符、保留词内下划线）。
- */
+/** 大纲项显示文本（空标题兜底序号；匹配口径仍是 entry.text，勿混用） */
+function outlineLabel(entry: OutlineEntry): string {
+  return entry.text || `标题 ${entry.index + 1}`;
+}
 
 /** ATX 标题行：^ {0,3}#{1,6} 后跟空白 */
 const ATX_RE = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/;
@@ -135,9 +142,11 @@ function jumpInSource(
   const rect =
     selection && selection.rangeCount > 0 ? selection.getRangeAt(0).getBoundingClientRect() : null;
   const containerRect = el.getBoundingClientRect();
+  // rect 差值是屏幕像素，scrollTop 是局部单位（zoom≠100% 相差 zoom 倍）——
+  // 换算见 screenPxToLocal
   const scrollTarget =
     rect && containerRect.height > 0 && rect.height > 0
-      ? Math.max(0, el.scrollTop + (rect.top - containerRect.top))
+      ? Math.max(0, el.scrollTop + screenPxToLocal(el, rect.top - containerRect.top))
       : -1;
 
   // 标题行对齐视口顶部 + 平滑滚动（与渲染模式 jumpTo 行为一致）
@@ -197,25 +206,33 @@ export function createOutlinePanel(
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'outline-item';
-      btn.dataset.level = String(entry.level);
-      btn.title = entry.text;
-      btn.textContent = entry.text;
+      // 点击闭包只捕获 index（= 按钮位置，稳定）；文案/级别随 refresh 原地更新
       btn.addEventListener('click', () => controller.jumpTo(entry.index));
+      applyButtonContent(btn, entry);
       treeEl.appendChild(btn);
       buttons.push(btn);
     }
   }
 
+  /** 按钮内容与条目同步（标题改字/改级时复用按钮，不整树重建） */
+  function applyButtonContent(btn: HTMLButtonElement, entry: OutlineEntry): void {
+    const label = outlineLabel(entry);
+    btn.dataset.level = String(entry.level);
+    btn.title = label;
+    btn.textContent = label;
+  }
+
   const controller: OutlineController = {
     refresh(): void {
-      const prevTexts = entries.map((e) => `${e.level}:${e.text}`).join('\n');
       entries = collectHeadings(editor);
-      const nextTexts = entries.map((e) => `${e.level}:${e.text}`).join('\n');
 
-      // 内容未变时保留按钮引用与滚动位置，避免闪烁
-      if (prevTexts !== nextTexts || buttons.length !== entries.length) {
-        rebuildDom();
+      // 数量不变 → 原地更新文案/级别：任一标题变化就 rebuildDom 全量重建
+      // 会丢滚动位置且闪烁；按钮引用与点击闭包（只用 index）都可复用
+      if (buttons.length === entries.length) {
+        entries.forEach((entry, i) => applyButtonContent(buttons[i], entry));
+        return;
       }
+      rebuildDom();
     },
 
     setActive(index: number | null): void {
@@ -265,9 +282,9 @@ export function createOutlinePanel(
           controller.setActive(entries.length - 1);
           return;
         }
-        // 文本起点在 56px 左 padding 之后，取 +60 保证命中正文行
+        // 文本起点在左 padding 之后（见 SOURCE_LINE_HIT_X_PX 注释）
         const range = document.caretRangeFromPoint(
-          containerRect.left + 60,
+          containerRect.left + SOURCE_LINE_HIT_X_PX,
           containerRect.top + SCROLL_ACTIVE_THRESHOLD_PX
         );
         if (!range) return;
@@ -281,14 +298,15 @@ export function createOutlinePanel(
       const container = document.querySelector('#editor-container');
       const pm = document.querySelector('.ProseMirror');
       if (!container || !pm || entries.length === 0) return;
-      const count = Math.min(pm.querySelectorAll('h1, h2, h3, h4, h5, h6').length, entries.length);
+      // 每帧一次 querySelectorAll（旧实现 count 与列表各查一次，scroll 高频路径白费一倍遍历）
+      const headings = pm.querySelectorAll('h1, h2, h3, h4, h5, h6');
+      const count = Math.min(headings.length, entries.length);
       // 滚到底：末尾标题可能因内容不足无法到达视口顶部，直接高亮最后一项
       if (container.scrollTop + container.clientHeight >= container.scrollHeight - 1) {
         if (count > 0) controller.setActive(count - 1);
         return;
       }
       const containerTop = container.getBoundingClientRect().top;
-      const headings = pm.querySelectorAll('h1, h2, h3, h4, h5, h6');
       let active: number | null = null;
       for (let i = 0; i < count; i++) {
         const top = (headings[i] as HTMLElement).getBoundingClientRect().top;
@@ -339,7 +357,9 @@ export function createOutlinePanel(
         if (headingEl && container) {
           const headingRect = headingEl.getBoundingClientRect();
           const containerRect = container.getBoundingClientRect();
-          scrollTarget = headingRect.top - containerRect.top + container.scrollTop;
+          // rect 差值（屏幕像素）÷zoom → 局部单位后再加 scrollTop（见 screenPxToLocal）
+          scrollTarget =
+            screenPxToLocal(container, headingRect.top - containerRect.top) + container.scrollTop;
         }
       });
 

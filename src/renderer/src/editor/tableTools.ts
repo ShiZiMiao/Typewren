@@ -180,7 +180,10 @@ export const tableTools = $prose(() => {
         destroy(): void {
           window.removeEventListener('resize', onReposition);
           window.removeEventListener('scroll', onReposition, true);
-          hide();
+          // 工具条建于 document.body（不随编辑器 DOM 一起消失），destroy 必须
+          // remove——hide() 只是收起，元素与按钮监听会残留到窗口关闭
+          toolbarEl?.remove();
+          toolbarEl = null;
           activeView = null;
         }
       };

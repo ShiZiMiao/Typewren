@@ -116,21 +116,22 @@ export function renderTocList(doc: ProseNode, onClick?: (pos: number) => void): 
   const rootUl = document.createElement('ul');
   root.appendChild(rootUl);
 
-  // 栈式嵌套：reluctant 括号内的水平缩进 = 标题级别
-  let lastLi: HTMLLIElement | null = null;
-  const stack: { level: number; ul: HTMLUListElement }[] = [
-    { level: headings[0].level, ul: rootUl }
+  // 栈式嵌套：栈顶条目记录该层级最近的 li——层级"跳深再回落"（h1→h3→h2）
+  // 时新嵌套 ul 必须挂在栈内对应层级的 li 下；用全局 lastLi 会挂到上一条
+  // （h3 的 li）上，层级错乱
+  const stack: { level: number; ul: HTMLUListElement; li: HTMLLIElement | null }[] = [
+    { level: headings[0].level, ul: rootUl, li: null }
   ];
 
   for (const heading of headings) {
     while (stack.length > 1 && heading.level < stack[stack.length - 1].level) {
       stack.pop();
     }
-    if (heading.level > stack[stack.length - 1].level) {
+    const top = stack[stack.length - 1];
+    if (heading.level > top.level) {
       const deeper = document.createElement('ul');
-      const parent = lastLi ?? stack[stack.length - 1].ul;
-      parent.appendChild(deeper);
-      stack.push({ level: heading.level, ul: deeper });
+      (top.li ?? top.ul).appendChild(deeper);
+      stack.push({ level: heading.level, ul: deeper, li: null });
     }
 
     const li = document.createElement('li');
@@ -143,8 +144,9 @@ export function renderTocList(doc: ProseNode, onClick?: (pos: number) => void): 
       a.addEventListener('click', () => onClick(heading.pos));
     }
     li.appendChild(a);
-    stack[stack.length - 1].ul.appendChild(li);
-    lastLi = li;
+    const current = stack[stack.length - 1];
+    current.ul.appendChild(li);
+    current.li = li;
   }
   return root;
 }

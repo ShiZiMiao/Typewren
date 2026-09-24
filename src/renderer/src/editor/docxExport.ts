@@ -2,11 +2,19 @@ import type { Editor } from '@milkdown/kit/core';
 import { parserCtx } from '@milkdown/kit/core';
 import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 
+import { MERMAID_NODE } from './mermaid';
+import { TOC_NODE } from './toc';
+
 /* ============================================================
  * Docx 结构化导出：把 Markdown（经编辑器 parser 重解析）转成
  * 平台无关的结构化 JSON，主进程用 npm 'docx' 库生成 .docx。
  * 覆盖：标题/段落/行内格式（粗斜体行内代码链接删除线）/列表
  * （有序/无序/任务）/表格/代码块/引用/分割线/公式与图表占位。
+ * 坑：gfm 表格的行/单元格类型是成对的两套——表头行 table_header_row +
+ * 表头单元格 table_header，数据行才是 table_row/table_cell；只认后者会
+ * 把整个表头行过滤掉（且主进程按 rows[0] 当表头做底纹，第一数据行被误染）。
+ * 坑2：schema mark 名是 strong/emphasis/strike_through/inlineCode/link
+ * （驼峰 inlineCode，不是下划线 inline_code——写错则行内代码永远无样式）。
  * ============================================================ */
 
 export interface DocxText {
@@ -15,7 +23,6 @@ export interface DocxText {
   italic?: boolean;
   strike?: boolean;
   code?: boolean;
-  underline?: boolean;
   href?: string;
 }
 
@@ -66,22 +73,37 @@ export interface DocxDoc {
   blocks: DocxBlock[];
 }
 
-/** 收集 textblock 的行内文本（含 marks） */
+/** 收集 textblock 的行内内容（含 marks）。
+ * 只收 isText 会让行内原子节点静默丢失（行内公式/图片/硬换行，
+ * 硬换行还使前后文本粘连）——这里一并转占位文本/换行 run。
+ * descendants 对行内原子节点同样会访问（其无子内容，不会重复下探）。 */
 function extractRuns(node: ProseNode): DocxText[] {
   const runs: DocxText[] = [];
   node.descendants((child) => {
     if (child.isText) {
+      // schema mark 名：strong/emphasis/strike_through/inlineCode/link。
+      // 'bold'/'italic'/'underline' 这类旧名在本 schema 不存在，判定恒 false，不写
       const markOf = (name: string): boolean => child.marks.some((m) => m.type.name === name);
       const link = child.marks.find((m) => m.type.name === 'link');
       runs.push({
         text: child.text ?? '',
-        bold: markOf('strong') || markOf('bold'),
-        italic: markOf('emphasis') || markOf('italic'),
+        bold: markOf('strong'),
+        italic: markOf('emphasis'),
         strike: markOf('strike_through'),
-        code: markOf('inline_code'),
-        underline: markOf('underline'),
+        code: markOf('inlineCode'),
         href: typeof link?.attrs.href === 'string' ? link.attrs.href : undefined
       });
+    } else if (child.type.name === 'inline_math') {
+      // 行内公式 Word 无对应物：转占位文本（与块级公式的 raw 占位同风格）
+      runs.push({ text: `$${String(child.attrs.value ?? '')}$` });
+    } else if (child.type.name === 'image') {
+      // 图片转 Markdown 式占位文本（docx 结构化 JSON 不承载二进制图片）
+      const alt = String(child.attrs.alt ?? '');
+      const src = String(child.attrs.src ?? '');
+      runs.push({ text: `![${alt}](${src})` });
+    } else if (child.type.name === 'hard_break') {
+      // 硬换行：独立 run 承载换行符，至少把前后文本隔开（不粘连）
+      runs.push({ text: '\n' });
     }
     return true;
   });
@@ -173,10 +195,17 @@ function extractBlocks(doc: ProseNode): DocxBlock[] {
     if (name === 'table') {
       const rows: DocxText[][][] = [];
       node.forEach((row) => {
-        if (row.type.name !== 'table_row') return;
+        // gfm 表头行是独立类型 table_header_row（行过滤只认 table_row 会整行丢表头）
+        const rowType = row.type.name;
+        if (rowType !== 'table_row' && rowType !== 'table_header_row') return;
         const cells: DocxText[][] = [];
         row.forEach((cell) => {
-          if (cell.type.name === 'table_cell') cells.push(extractCellRuns(cell));
+          // 表头单元格同理是 table_header（主进程按 rows[0] 当表头做底纹，
+          // 表头行缺失时第一数据行会被误染灰）
+          const cellType = cell.type.name;
+          if (cellType === 'table_cell' || cellType === 'table_header') {
+            cells.push(extractCellRuns(cell));
+          }
         });
         rows.push(cells);
       });
@@ -184,26 +213,21 @@ function extractBlocks(doc: ProseNode): DocxBlock[] {
       return false;
     }
 
-    if (name === 'math' || name === 'inline_math') {
+    // 块级公式转 $$…$$ 占位文本。
+    // 行内公式（inline_math）与图片不再在此分支：它们只出现在 textblock 内部，
+    // 而 textblock 分支不下探，旧写法恒不可达——已并入 extractRuns
+    if (name === 'math') {
       blocks.push({ type: 'raw', text: `$$${node.attrs.value}$$` });
       return false;
     }
 
-    if (name === 'typewren_mermaid') {
+    if (name === MERMAID_NODE) {
       blocks.push({ type: 'raw', text: '```mermaid\n' + (node.attrs.value as string) + '\n```' });
       return false;
     }
 
-    if (name === 'typewren_toc') {
+    if (name === TOC_NODE) {
       blocks.push({ type: 'toc' });
-      return false;
-    }
-
-    if (name === 'image') {
-      blocks.push({
-        type: 'raw',
-        text: `![${node.attrs.alt ?? ''}](${node.attrs.src ?? ''})`
-      });
       return false;
     }
 

@@ -27,8 +27,11 @@ export function createFileTreePanel(deps: FileTreePanelDeps): FileTreePanel {
 
   /** 当前显示的目录（相对文档根目录的路径片段栈） */
   let dirStack: string[] = [];
+  /** render 请求序号：过期 listDir 响应不得覆盖新目录的清单（并发防护） */
+  let renderSeq = 0;
 
-  const currentDirRelative = (): string | null => {
+  /** 文档所在目录的绝对路径（正斜杠归一；名副其实——是绝对目录不是相对片段） */
+  const currentDirAbs = (): string | null => {
     const docPath = getDocPath();
     if (!docPath) return null;
     const normalized = docPath.replace(/\\/g, '/');
@@ -36,23 +39,23 @@ export function createFileTreePanel(deps: FileTreePanelDeps): FileTreePanel {
   };
 
   const targetDirPath = (): string | null => {
-    const base = currentDirRelative();
+    const base = currentDirAbs();
     if (base === null) return null;
-    const parts = base.split('/').filter(Boolean);
-    // 把 Windows 盘符（C:）与根目录层级拼回绝对路径交给主进程校验
-    if (parts.length > 0 && /^[A-Za-z]:$/.test(parts[0])) {
-      return parts[0] + '/' + [...parts.slice(1), ...dirStack].join('/');
-    }
-    return null;
+    // 直接字符串拼接：盘符（C:/x）、POSIX 根（/home/x）、UNC（//server/share）
+    // 三种形态的 base 都已是合法绝对目录——旧实现按 '/' 切段后只认
+    // `^[A-Za-z]:$` 盘符段，POSIX/UNC 路径一律返回 null 且文案误导成
+    // "保存文档后显示同目录文件"。目录校验（文档目录子树内）仍在主进程。
+    return dirStack.length > 0 ? `${base}/${dirStack.join('/')}` : base;
   };
 
   const render = async (): Promise<void> => {
+    const seq = ++renderSeq;
     treeEl.textContent = '';
     const docPath = getDocPath();
     const dirPath = targetDirPath();
 
     // 文档根目录（面包屑/返回用的基准）
-    const base = currentDirRelative() ?? '';
+    const base = currentDirAbs() ?? '';
 
     if (!docPath || !dirPath) {
       const empty = document.createElement('div');
@@ -63,6 +66,9 @@ export function createFileTreePanel(deps: FileTreePanelDeps): FileTreePanel {
     }
 
     const entries = await window.typewren.listDir({ docPath, dirPath }).catch(() => []);
+    // 过期响应（期间用户已进入其它目录/换了文档）直接丢弃，
+    // 否则慢的旧 listDir 回来会把新目录的清单整个覆盖掉
+    if (seq !== renderSeq) return;
 
     if (dirStack.length > 0) {
       const up = document.createElement('button');

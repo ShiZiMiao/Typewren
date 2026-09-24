@@ -4,15 +4,26 @@ import { sendCommand } from './io';
 import { createMainWindow } from './window';
 import { checkForUpdates } from './updater';
 import { clearRecentFiles, getRecentFiles } from './docRegistry';
+import { suppressesUi } from './runMode';
 import { MENU_TOP_LABELS } from '../shared/menu';
 import type { CommandName } from '../shared/ipc';
+
+/**
+ * 菜单项 + 运行时 command 字段（menu:popup 按渲染层状态补勾选态用）。
+ * submenu 收窄为本类型数组，模板内嵌套项的 command 才能一路保留类型
+ * （MenuItemConstructorOptions 本身不认识 command，旧实现靠 4 处裸断言透传）。
+ */
+interface CommandMenuItem extends MenuItemConstructorOptions {
+  command?: CommandName;
+  submenu?: CommandMenuItem[] | Menu;
+}
 
 function item(
   label: string,
   command: CommandName,
   accelerator?: string,
   payload?: unknown
-): MenuItemConstructorOptions {
+): CommandMenuItem {
   return {
     label,
     accelerator,
@@ -23,7 +34,7 @@ function item(
         focusedWindow instanceof BrowserWindow ? focusedWindow : BrowserWindow.getAllWindows()[0];
       if (win) sendCommand(win, command, payload);
     }
-  } as MenuItemConstructorOptions;
+  };
 }
 
 function buildRecentSubmenu(): MenuItemConstructorOptions[] {
@@ -46,7 +57,7 @@ function buildRecentSubmenu(): MenuItemConstructorOptions[] {
   ];
 }
 
-function buildTemplate(): MenuItemConstructorOptions[] {
+function buildTemplate(): CommandMenuItem[] {
   return [
     // ---------- 文件 ----------
     {
@@ -144,9 +155,13 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         item('背景图片设置…', 'view:background-settings'),
         item('切换亮色 / 暗色主题', 'view:theme', 'CmdOrCtrl+Shift+L'),
         { type: 'separator' },
-        { label: '放大', role: 'zoomIn' },
-        { label: '缩小', role: 'zoomOut' },
-        { label: '重置缩放', role: 'resetZoom' },
+        // 缩放必须写显式 accelerator：role zoomIn/zoomOut/resetZoom 的默认加速器
+        // 实测失灵（zoomIn 默认串 CommandOrControl+Plus 无键可匹配），见 AGENTS.md 决策 #20。
+        // Ctrl+0 让位给段落→正文；重置用 Ctrl+Shift+D（D=Default）——
+        // Ctrl+Shift+数字疑似被中文输入法热键吞掉，菜单不显示数字组合。
+        item('放大', 'view:zoom-in', 'CmdOrCtrl+='),
+        item('缩小', 'view:zoom-out', 'CmdOrCtrl+-'),
+        item('重置缩放', 'view:zoom-reset', 'CmdOrCtrl+Shift+D'),
         // 重载 / 开发者工具只在开发期暴露（打包版用户不需要）
         ...(!app.isPackaged
           ? ([
@@ -170,7 +185,9 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         {
           label: '关于 Typewren',
           click: () => {
-            dialog.showMessageBoxSync({
+            // 异步对话框：showMessageBoxSync 会阻塞主进程事件循环，
+            // 多窗口下其它窗口的 IPC 一起卡死（同 AGENTS 决策 #15 的关闭保护坑）
+            void dialog.showMessageBox({
               type: 'info',
               title: '关于 Typewren',
               message: `Typewren v${app.getVersion()}`,
@@ -201,11 +218,11 @@ export function refreshApplicationMenu(): void {
  * 转成 checkbox 项（menu:popup 每次重建模板，勾选态永远是最新）。
  */
 function withCheckedStates(
-  items: MenuItemConstructorOptions[],
+  items: CommandMenuItem[],
   states: Record<string, boolean>
-): MenuItemConstructorOptions[] {
+): CommandMenuItem[] {
   return items.map((m) => {
-    const command = (m as { command?: string }).command;
+    const command = m.command;
     if (command && typeof states[command] === 'boolean') {
       return { ...m, type: 'checkbox' as const, checked: states[command] };
     }
@@ -214,21 +231,33 @@ function withCheckedStates(
 }
 
 /** 顶层菜单项的子菜单（自绘菜单栏弹出用） */
-function getSubmenuTemplate(label: string): MenuItemConstructorOptions[] | null {
+function getSubmenuTemplate(label: string): CommandMenuItem[] | null {
   const top = buildTemplate().find((m) => m.label === label);
-  if (!top || !('submenu' in top) || !Array.isArray(top.submenu)) return null;
-  return top.submenu as MenuItemConstructorOptions[];
+  if (!top) return null;
+  const sub = top.submenu;
+  return Array.isArray(sub) ? sub : null;
 }
 
 /**
- * 弹窗左边参数归一化：popup 的 x/y 在原生侧是 int——
- * 页面缩放（Ctrl+=/-）后 getBoundingClientRect 产生小数坐标（如 7.5px），
- * gin 转换失败弹 "Error processing argument"；必须取整、非有限数放弃。
+ * 弹出坐标归一化（纯函数）：渲染层传来的是 getBoundingClientRect 的
+ * **视口 CSS 坐标**，而 popup 的 x/y 是**窗口客户区 DIP**——
+ * 缩放后 CSS px ≠ DIP（css = dip / zoomFactor），须先 × zoomFactor 换算。
+ * 两个坑一起收口：
+ * ① 页面缩放后坐标是小数（如 7.5px），gin 侧 x/y 是 int，转换失败弹
+ *   "Error processing argument"——换算后取整；
+ * ② 缩放后弹出位置错位（缩小偏右下 / 放大偏左上）——漏乘 zoomFactor 所致，
+ *   zoom=1 时恒等变换故此前没暴露。
  */
-export function normalizePopupPosition(x: unknown, y: unknown): { x: number; y: number } | null {
+export function normalizePopupPosition(
+  x: unknown,
+  y: unknown,
+  zoomFactor: unknown
+): { x: number; y: number } | null {
   if (typeof x !== 'number' || typeof y !== 'number') return null;
-  const nx = Math.round(x);
-  const ny = Math.round(y);
+  if (typeof zoomFactor !== 'number' || !Number.isFinite(zoomFactor) || zoomFactor <= 0)
+    return null;
+  const nx = Math.round(x * zoomFactor);
+  const ny = Math.round(y * zoomFactor);
   if (!Number.isFinite(nx) || !Number.isFinite(ny)) return null;
   return { x: nx, y: ny };
 }
@@ -253,16 +282,19 @@ export function registerMenuPopup(): void {
       }
       const sub = getSubmenuTemplate(payload.label);
       if (!sub) return;
-      const pos = normalizePopupPosition(payload.x, payload.y);
+      // 视口 CSS 坐标 × zoomFactor → 窗口客户区 DIP（缩放后 CSS px ≠ DIP，见函数注释）
+      const pos = normalizePopupPosition(payload.x, payload.y, win.webContents.getZoomFactor());
       if (!pos) return;
       // 测试模式不真实弹出：窗口已抑制显示（--test/--headless），但 Menu.popup
       // 仍会试着把菜单弹到屏幕（窗口 bounds 位于原点时就是左上角冒菜单，
       // 用户看到的就是测试跑出的"莫名其妙弹窗"）。参数校验路径完整保留。
-      if (process.argv.includes('--test') || process.argv.includes('--headless')) return;
-      const states =
-        payload.states && typeof payload.states === 'object'
-          ? (payload.states as Record<string, boolean>)
-          : {};
+      if (suppressesUi()) return;
+      const states: Record<string, boolean> = {};
+      if (payload.states && typeof payload.states === 'object') {
+        for (const [key, value] of Object.entries(payload.states)) {
+          if (typeof value === 'boolean') states[key] = value;
+        }
+      }
       Menu.buildFromTemplate(withCheckedStates(sub, states)).popup({
         window: win,
         x: pos.x,

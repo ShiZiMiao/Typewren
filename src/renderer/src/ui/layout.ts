@@ -9,26 +9,24 @@
 
 import { MENU_TOP_LABELS } from '../../../shared/menu';
 
+/**
+ * 装配层消费的布局元素契约。
+ * 只暴露有消费方的字段：root/titlebar/titlebarIcon/sideTabs/editorContainer/
+ * sourceContainer/statusBar 等骨架元素全仓（src+tests）无消费方，
+ * 不再进接口（要用再按 DOM id 取，避免接口堆死字段）。
+ */
 export interface AppLayout {
-  root: HTMLElement;
-  titlebar: HTMLElement;
-  titlebarIcon: HTMLImageElement;
   titlebarTitle: HTMLElement;
   menubar: HTMLElement;
   app: HTMLElement;
   sidePanel: HTMLElement;
-  sideTabs: HTMLElement;
   btnTabFiles: HTMLButtonElement;
   btnTabOutline: HTMLButtonElement;
-  sideCollapseBtn: HTMLButtonElement;
   outlineTree: HTMLElement;
   filetreeItems: HTMLElement;
   btnSidebarToggle: HTMLButtonElement;
-  editorContainer: HTMLElement;
   editorHost: HTMLElement;
-  sourceContainer: HTMLElement;
   sourceTextarea: HTMLElement;
-  statusBar: HTMLElement;
   wordCountEl: HTMLElement;
   cursorPosEl: HTMLElement;
   btnSourceToggle: HTMLButtonElement;
@@ -95,14 +93,7 @@ export function buildLayout(parent: HTMLElement): AppLayout {
   const filetreeItems = document.createElement('nav');
   filetreeItems.id = 'filetree-items';
 
-  // 收起按钮（Typora 右下角 ‹ 形态）
-  const sideCollapseBtn = document.createElement('button');
-  sideCollapseBtn.type = 'button';
-  sideCollapseBtn.className = 'side-collapse';
-  sideCollapseBtn.title = '收起侧边栏 (Ctrl+\\)';
-  sideCollapseBtn.textContent = '‹';
-
-  sidePanel.append(sideTabs, outlineTree, filetreeItems, sideCollapseBtn);
+  sidePanel.append(sideTabs, outlineTree, filetreeItems);
 
   /* ---------- 编辑区 ---------- */
   const editorContainer = document.createElement('main');
@@ -157,6 +148,8 @@ export function buildLayout(parent: HTMLElement): AppLayout {
 
   const btnThemeToggle = document.createElement('button');
   btnThemeToggle.type = 'button';
+  // 稳定 id 供测试/自动化按 id 定位（按 title 文案定位会在文案调整时全断）
+  btnThemeToggle.id = 'btn-theme-toggle';
   btnThemeToggle.title = '切换亮色 / 暗色主题';
   btnThemeToggle.textContent = '☾ 暗色';
 
@@ -172,25 +165,17 @@ export function buildLayout(parent: HTMLElement): AppLayout {
   parent.append(titlebar, menubar, app, statusBar);
 
   return {
-    root: parent,
-    titlebar,
-    titlebarIcon,
     titlebarTitle,
     menubar,
     app,
     sidePanel,
-    sideTabs,
     btnTabFiles,
     btnTabOutline,
-    sideCollapseBtn,
     outlineTree,
     filetreeItems,
     btnSidebarToggle,
-    editorContainer,
     editorHost,
-    sourceContainer,
     sourceTextarea,
-    statusBar,
     wordCountEl,
     cursorPosEl,
     btnSourceToggle,

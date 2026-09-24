@@ -1,20 +1,23 @@
 {
   "name": "typewren",
   "productName": "Typewren",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Typewren —— 单栏所见即所得 Markdown 桌面编辑器（基于 Electron + Milkdown）",
   "main": "./out/main/index.js",
   "author": "Typewren Team",
   "license": "MIT",
   "private": true,
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
     "preview": "electron-vite preview",
-    "start": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
-    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web && npm run typecheck:test",
     "lint": "eslint src tests",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -22,21 +25,16 @@
     "test": "npx playwright test"
   },
   "dependencies": {
-    "@milkdown/kit": "^7.22.1",
-    "@milkdown/plugin-highlight": "^7.22.1",
     "docx": "^9.7.1",
     "electron-updater": "^6.8.9",
     "highlight.js": "^11.12.0",
-    "katex": "^0.18.0",
-    "lowlight": "^3.3.0",
-    "mermaid": "^12.0.0",
-    "prosemirror-highlight": "^0.15.0",
-    "remark-footnotes": "^5.0.0",
-    "remark-math": "^6.0.0"
+    "katex": "^0.18.0"
   },
   "devDependencies": {
     "@lezer/highlight": "^1.2.3",
     "@lezer/markdown": "^1.7.2",
+    "@milkdown/kit": "^7.22.1",
+    "@milkdown/plugin-highlight": "^7.22.1",
     "@playwright/test": "^1.62.1",
     "@types/node": "^24.0.0",
     "electron": "^44.0.0",
@@ -44,15 +42,23 @@
     "electron-vite": "^5.0.0",
     "eslint": "^10.9.1",
     "eslint-config-prettier": "^10.1.8",
-    "playwright": "^1.62.1",
+    "lowlight": "^3.3.0",
+    "mermaid": "^12.0.0",
     "prettier": "^3.9.6",
+    "prosemirror-highlight": "^0.15.0",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "remark-parse": "^11.0.0",
+    "remark-stringify": "^11.0.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.69.0",
+    "unified": "^11.0.5",
     "vite": "^7.0.0"
   },
   "allowScripts": {
     "esbuild@0.25.12": true,
     "esbuild@0.28.2": true,
-    "electron@44.0.0": true
+    "electron-winstaller@5.4.0": true,
+    "electron@44.4.5": true
   }
 }
