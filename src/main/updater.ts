@@ -1,4 +1,4 @@
-import { app, dialog, BrowserWindow, ipcMain } from 'electron';
+import { app, dialog, shell, BrowserWindow, ipcMain } from 'electron';
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import { autoUpdater, CancellationToken } from 'electron-updater';
@@ -23,6 +23,10 @@ import type { UpdateDownloadState } from '../shared/ipc';
 const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /** 上次检查时间戳缓存文件（userData 下） */
 const LAST_CHECK_FILE = 'last-update-check.json';
+/** 发布页基址（「查看更新日志」按钮打开 GitHub 渲染版式的完整日志） */
+const RELEASE_TAG_BASE = 'https://github.com/ShiZiMiao/Typewren/releases/tag';
+/** 「发现新版本」弹框里更新说明的最大行数（完整版在发布页） */
+const NOTES_MAX_LINES = 24;
 
 /** 事件只注册一次（防止重复订阅导致多弹框） */
 let eventsRegistered = false;
@@ -114,13 +118,56 @@ async function markChecked(): Promise<void> {
   }
 }
 
-function notesText(notes: unknown): string {
-  if (Array.isArray(notes)) {
-    return notes
-      .map((n) => (typeof n === 'object' && n ? String((n as { note?: unknown }).note ?? '') : ''))
-      .join('\n');
+/**
+ * 发布说明 HTML → 弹框可用的纯文本（纯函数，供单测）。
+ * 来源：GitHub releases.atom 的 `<content>` 是 **markdown 渲染后的 HTML**，
+ * electron-updater 原样放进 releaseNotes——直接塞原生弹框会裸露 <h2>/<li> 等
+ * 标签（用户实测截图）。转换规则：块级标签分行、`<li>` 转项目符号、行内标签
+ * 去标记留内容；实体解码放在去标签**之后**（代码示例里的 `&lt;div&gt;` 要还原成
+ * 字面量而不是被当标签剥掉）。
+ */
+export function htmlNotesToPlainText(html: string): string {
+  const text = html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '\n• ')
+    .replace(/<\/(li|p|h[1-6]|ul|ol|div|tr|blockquote)>/gi, '\n')
+    .replace(/<(p|h[1-6])[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&#x([0-9a-f]+);|&#(\d+);/gi, (_m, hex: string, dec: string) => {
+      try {
+        return String.fromCodePoint(parseInt(hex ?? dec, hex ? 16 : 10));
+      } catch {
+        return '';
+      }
+    })
+    .replace(/&amp;/g, '&');
+  return text
+    .split('\n')
+    .map((line) => line.replace(/\s+$/g, ''))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** 归一并截断 electron-updater 的 releaseNotes（数组/字符串、HTML/纯文本都收） */
+export function formatReleaseNotes(notes: unknown): string {
+  const raw = Array.isArray(notes)
+    ? notes
+        .map((n) => (typeof n === 'object' && n ? String((n as { note?: unknown }).note ?? '') : ''))
+        .join('\n\n')
+    : String(notes ?? '');
+  const text = htmlNotesToPlainText(raw);
+  if (!text) return '';
+  const lines = text.split('\n');
+  if (lines.length > NOTES_MAX_LINES) {
+    return `${lines.slice(0, NOTES_MAX_LINES).join('\n')}\n……（完整更新日志见发布页）`;
   }
-  return String(notes ?? '');
+  return text;
 }
 
 /** 把 electron-updater 的原始错误转成对用户简洁的提示 */
@@ -298,17 +345,25 @@ export async function checkForUpdates(silent = false): Promise<void> {
     if (downloadPhase !== 'idle') return;
     const win = activeWindow();
     if (!win) return;
+    // 更新说明先归一成纯文本再进弹框（原生消息框不渲染 HTML/Markdown）。
+    // 原生弹框只承载摘要；完整日志经「查看更新日志」开发布页看渲染版式
+    const notes = formatReleaseNotes(result.updateInfo.releaseNotes);
     const { response } = await dialog.showMessageBox(win, {
       type: 'info',
       title: 'Typewren - 发现新版本',
       message: `发现新版本 v${result.updateInfo.version}`,
-      detail: `当前版本: v${app.getVersion()}\n\n${notesText(result.updateInfo.releaseNotes)}`,
-      buttons: ['下载更新', '稍后提醒'],
+      detail: `当前版本: v${app.getVersion()}${notes ? `\n\n${notes}` : ''}`,
+      buttons: ['下载更新', '查看更新日志', '稍后提醒'],
       defaultId: 0,
-      cancelId: 1,
+      cancelId: 2,
       noLink: true
     });
-    if (response === 0) startDownload(result.updateInfo.version);
+    if (response === 0) {
+      startDownload(result.updateInfo.version);
+    } else if (response === 1) {
+      // 开发布页后不自动下载（页面上也有安装包）；之后仍可经「检查更新」升级
+      void shell.openExternal(`${RELEASE_TAG_BASE}/v${result.updateInfo.version}`);
+    }
   } catch (error) {
     // 检查本身抛错（网络异常等）：静默模式不打扰；error 事件对检查期错误不再弹框
     if (!silent) {
