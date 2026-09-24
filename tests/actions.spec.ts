@@ -6,16 +6,14 @@ import {
   launchApp,
   closeApp,
   loadContent,
+  readSource,
   sendCommand,
   setDialog,
   type AppHandle
 } from './helpers';
+import { pngBuffer } from './fixtures/png';
 
 let app: AppHandle;
-
-/** 1x1 透明 PNG */
-const PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 test.beforeAll(async () => {
   app = await launchApp();
@@ -216,7 +214,7 @@ test.describe('格式命令（cmd 通道直达 actions）', () => {
     const pngDir = join(tmpdir(), 'typewren-actions-img');
     mkdirSync(pngDir, { recursive: true });
     const png = join(pngDir, 'insert-me.png');
-    writeFileSync(png, Buffer.from(PNG_BASE64, 'base64'));
+    writeFileSync(png, pngBuffer());
     await setDialog(app, { open: png });
     await sendCommand(app, 'format:image');
 
@@ -224,9 +222,47 @@ test.describe('格式命令（cmd 通道直达 actions）', () => {
     await expect(img).toHaveCount(1, { timeout: 8000 });
     // 未保存文档的绝对路径引用也经本地协议解析——真实加载成功才算通过
     await expect
-      .poll(() => img.evaluate((el) => (el as HTMLImageElement).complete && el.naturalWidth > 0), {
-        timeout: 8000
-      })
+      .poll(
+        () =>
+          img.evaluate((el) => {
+            const image = el as HTMLImageElement;
+            return image.complete && image.naturalWidth > 0;
+          }),
+        { timeout: 8000 }
+      )
+      .toBe(true);
+  });
+
+  test('源码模式插入图片：落进源码视图，退出源码后仍在（fix 回归）', async () => {
+    await loadContent(app, '段落文字');
+    await sendCommand(app, 'view:source');
+    await app.window.waitForTimeout(200);
+
+    const pngDir = join(tmpdir(), 'typewren-actions-img');
+    mkdirSync(pngDir, { recursive: true });
+    const png = join(pngDir, 'source-insert.png');
+    writeFileSync(png, pngBuffer());
+    await setDialog(app, { open: png });
+    await sendCommand(app, 'format:image');
+
+    // 插入必须落进源码视图（insertMarkdown 源码分支）——写渲染视图会被
+    // 退出源码的 setMarkdown 写回整段覆盖丢失
+    await expect.poll(() => readSource(app), { timeout: 8000 }).toContain('![](');
+
+    // 退出源码（写回）后图片仍在文档里并真实加载
+    await sendCommand(app, 'view:source');
+    await app.window.waitForTimeout(400);
+    const img = app.window.locator('.ProseMirror img[src^="typewren-img://local/"]');
+    await expect(img).toHaveCount(1, { timeout: 8000 });
+    await expect
+      .poll(
+        () =>
+          img.evaluate((el) => {
+            const image = el as HTMLImageElement;
+            return image.complete && image.naturalWidth > 0;
+          }),
+        { timeout: 8000 }
+      )
       .toBe(true);
   });
 

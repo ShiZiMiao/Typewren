@@ -7,8 +7,10 @@ import { lowlight } from '../editor/highlight';
  * 源码视图是 contenteditable div：不能往 DOM 里插高亮 span（会破坏
  * 光标/选区与文本流）。这里用 @lezer/markdown（CodeMirror 6 的
  * Markdown 解析内核，纯 JS）对 Markdown 建语法树，把有意义的结构
- * 节点映射为非重叠的文本区间 [start,end)，注册到 CSS.highlights，
+ * 节点映射为文本区间 [start,end)，注册到 CSS.highlights，
  * 由 CSS ::highlight() 规则着色——文本节点保持原样，编辑完全无感。
+ * （结构节点整体成 token、内部按子节点边界"雕刻"，故区间允许嵌套：
+ * 代码块整段 code-block 兜底之上还叠内嵌语言分词。）
  *
  * 代码块内容（CodeText）另用 lowlight(highlight.js) 按内嵌语言分词，
  * 与编辑器代码块高亮同源；纯文本段不产生任何 token（正确的不着色语义）。
@@ -105,8 +107,8 @@ const STYLE_CLASSES = new Set([
   'regexp',
   'symbol',
   'type',
-  'punctuation',
-  'formula'
+  'punctuation'
+  // 'formula' 已删：NODE_CLASS 不产该类、hljs 也不发这个 token 名，配套 CSS 同步移除
 ]);
 
 export interface SourceToken {
@@ -221,8 +223,11 @@ export function tokenizeSource(text: string): SourceToken[] {
         return;
       }
       let ownCls = inheritedCls;
-      if (n.type === 'element' && Array.isArray(n.properties?.className)) {
-        const first = String((n.properties!.className as string[])[0]);
+      const classNames = n.properties?.className;
+      if (n.type === 'element' && Array.isArray(classNames)) {
+        // Array.isArray 已把 unknown 收窄成数组，首元素才是 hljs-xxx 类名；
+        // 不再 properties! + as string[] 裸断言（className 可能是 string/undefined）
+        const first = String(classNames[0]);
         ownCls = normalizeClass(first) ?? inheritedCls;
       }
       for (const child of (n.children ?? []) as {
@@ -274,8 +279,10 @@ export function tokenizeSource(text: string): SourceToken[] {
 
 /**
  * 把 token 区间映射为源码编辑区里的 Range 列表（按类名分组）。
- * 文本流校验失败（存在 <br> 等非文本节点导致偏移失真）时返回空，
- * 调用方安全降级为纯文本显示。
+ * 偏移按"全部文本节点 data 的累计长度"定位，Range 起止都落在文本节点上
+ * ——<br>/元素节点不贡献字符、不参与偏移，跨节点 token 由 setStart/setEnd
+ * 落到首尾文本节点天然成立，无需按 textContent 再校验（旧校验拿
+ * textContent 长度对比同一棵树的累计值，恒等恒真，纯属死代码）。
  */
 export function tokensToRanges(el: HTMLElement, tokens: SourceToken[]): Map<string, Range[]> {
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -289,9 +296,6 @@ export function tokensToRanges(el: HTMLElement, tokens: SourceToken[]): Map<stri
     cursor += node.data.length;
   }
 
-  if (el.textContent === null || el.textContent.length !== cursor) {
-    return new Map();
-  }
   if (textNodes.length === 0) return new Map();
 
   const groups = new Map<string, Range[]>();

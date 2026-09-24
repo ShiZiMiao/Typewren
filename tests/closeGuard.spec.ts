@@ -70,7 +70,7 @@ test.describe('关闭保护', () => {
       await handle.window.keyboard.type('脏内容');
       await handle.window.waitForTimeout(300);
 
-      setDialog(handle, { discard: 2 });
+      await setDialog(handle, { discard: 2 });
       await requestWindowClose(handle);
       await handle.window.waitForTimeout(600);
 
@@ -93,7 +93,7 @@ test.describe('关闭保护', () => {
       await handle.window.keyboard.type('脏');
       await handle.window.waitForTimeout(300);
 
-      setDialog(handle, { discard: 1 });
+      await setDialog(handle, { discard: 1 });
       const closed = handle.window.waitForEvent('close', { timeout: 10000 }).then(() => true);
       await requestWindowClose(handle);
       expect(await closed).toBe(true);
@@ -110,7 +110,7 @@ test.describe('关闭保护', () => {
       await handle.window.keyboard.type('待保存');
       await handle.window.waitForTimeout(300);
 
-      setDialog(handle, { discard: 0, saveAs: SAVE_PATH });
+      await setDialog(handle, { discard: 0, saveAs: SAVE_PATH });
       const closed = handle.window.waitForEvent('close', { timeout: 10000 }).then(() => true);
       await requestWindowClose(handle);
 

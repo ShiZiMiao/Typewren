@@ -1,24 +1,32 @@
 /* ============================================================
  * 搜索栏组件：Ctrl+F 查找 / Esc 关闭 / Enter 下一个 / Shift+Enter 上一个
- * 替换功能：Ctrl+H 切换替换面板
+ * 替换功能：Ctrl+H 打开查找+替换（幂等，可连按）
  * 渲染模式和源码模式统一使用 CSS Custom Highlight API
  * ============================================================ */
 
 import type { Editor } from '@milkdown/kit/core';
 import { editorViewCtx } from '@milkdown/kit/core';
+import type { EditorView } from '@milkdown/kit/prose/view';
 
 import { insertTextViaInputEvent } from '@/util/inputEvent';
+import { screenPxToLocal } from './zoom';
 
 export interface SearchBar {
-  container: HTMLElement;
   show(): void;
   hide(): void;
   toggle(): void;
-  toggleReplace(): void;
+  /** Ctrl+H 语义：确保搜索栏打开 + 替换行可见（幂等，连按两次状态不变）。
+   * 旧实现是 toggle()+toggleReplace() 组合——替换面板已开时先整个关掉
+   * 再把 replace 行显示在隐藏容器里，状态直接错乱。 */
+  openWithReplace(): void;
+  /** 文档变化后重扫高亮（保持当前序号、不抢滚动）。
+   * 搜索高亮存的是 DOM Range，PM 改写文档后 Range 陈旧——不重扫的话
+   * 「替换/全部替换」拿陈旧 Range 换算 PM 位置会抛 RangeError 或替换错位。 */
+  refresh(): void;
 }
 
 class SearchBarController implements SearchBar {
-  container: HTMLElement;
+  private readonly container: HTMLElement;
 
   private readonly input: HTMLInputElement;
   private readonly matchCount: HTMLSpanElement;
@@ -139,6 +147,7 @@ class SearchBarController implements SearchBar {
     btnNext.addEventListener('click', () => this.navigateNext());
     btnPrev.addEventListener('click', () => this.navigatePrev());
     btnClose.addEventListener('click', () => this.hide());
+    // 按钮保留"切换"语义（再点收起替换行）；Ctrl+H 走 openWithReplace 幂等
     btnToggleReplace.addEventListener('click', () => this.toggleReplace());
     btnReplace.addEventListener('click', () => this.replaceCurrent());
     btnReplaceAll.addEventListener('click', () => this.replaceAllMatches());
@@ -154,7 +163,13 @@ class SearchBarController implements SearchBar {
   }
 
   // ---------- 统一搜索逻辑（渲染模式 + 源码模式） ----------
-  private doHighlight(keyword: string): void {
+
+  /** 高亮重扫选项：keepIndex 保持当前序号（夹到新总数）；scroll 控制是否滚到当前匹配 */
+  private doHighlight(
+    keyword: string,
+    opts: { keepIndex?: boolean; scroll?: boolean } = {}
+  ): void {
+    const previousIndex = this.matchIndex;
     this.clearHighlights();
     this.totalMatches = 0;
     this.matchIndex = 0;
@@ -196,27 +211,45 @@ class SearchBarController implements SearchBar {
         ranges.push(range);
 
         this.totalMatches++;
-        pos = idx + 1;
+        // 匹配推进必须**非重叠**（idx + keyword.length），与 replaceAll 的推进
+        // 同口径：旧实现 pos = idx + 1 允许重叠匹配（'aa' 在 'aaaa' 记 3 处），
+        // 而替换按非重叠只替 2 处——计数与替换结果对不上；渲染模式"全部替换"
+        // 还会对重叠区间反向 insertText 互相踩踏、破坏正文
+        pos = idx + keyword.length;
       }
     });
 
-    // 添加所有匹配到高亮
-    ranges.forEach((range, i) => {
-      if (i === 0) {
+    this.currentRanges = ranges;
+    if (this.totalMatches === 0) {
+      this.matchCount.textContent = '0/0';
+      return;
+    }
+
+    this.matchIndex =
+      opts.keepIndex && previousIndex > 0 ? Math.min(previousIndex, this.totalMatches) : 1;
+    this.paintCurrent();
+    this.matchCount.textContent = `${this.matchIndex}/${this.totalMatches}`;
+    if (opts.scroll !== false) this.scrollToCurrent();
+  }
+
+  /** 按当前 matchIndex 重新着色（当前匹配用高亮色，其余普通色） */
+  private paintCurrent(): void {
+    this.clearHighlights();
+    this.currentRanges.forEach((range, i) => {
+      if (i === this.matchIndex - 1) {
         this.searchHighlightCurrent.add(range);
       } else {
         this.searchHighlight.add(range);
       }
     });
+  }
 
-    this.currentRanges = ranges;
-    this.matchIndex = this.totalMatches > 0 ? 1 : 0;
-    this.matchCount.textContent =
-      this.totalMatches > 0 ? `${this.matchIndex}/${this.totalMatches}` : '0/0';
-
-    if (this.totalMatches > 0) {
-      this.scrollToCurrent();
-    }
+  refresh(): void {
+    // 隐藏 / 无关键词时无需重扫（编辑期间每笔输入都会走到这里）
+    if (this.container.style.display === 'none') return;
+    if (!this.lastKeyword) return;
+    // 保持序号、不抢滚动：用户正在文档里打字，视口不能被搜索栏拽走
+    this.doHighlight(this.lastKeyword, { keepIndex: true, scroll: false });
   }
 
   private scrollToCurrent(): void {
@@ -235,24 +268,18 @@ class SearchBarController implements SearchBar {
     const containerRect = scrollContainer.getBoundingClientRect();
 
     if (rect.top < containerRect.top || rect.bottom > containerRect.bottom) {
-      const scrollOffset = rect.top - containerRect.top - containerRect.height / 2;
+      // rect 差值是屏幕像素（zoom 子树内 ×zoom），scrollBy 的 top 是局部单位——
+      // 换算见 screenPxToLocal；容器高度用 clientHeight（恒为局部单位）
+      const scrollOffset =
+        screenPxToLocal(scrollContainer, rect.top - containerRect.top) -
+        scrollContainer.clientHeight / 2;
       scrollContainer.scrollBy({ top: scrollOffset, behavior: 'smooth' });
     }
   }
 
   private updateHighlightIndex(): void {
     if (this.currentRanges.length === 0) return;
-
-    this.clearHighlights();
-
-    this.currentRanges.forEach((range, i) => {
-      if (i === this.matchIndex - 1) {
-        this.searchHighlightCurrent.add(range);
-      } else {
-        this.searchHighlight.add(range);
-      }
-    });
-
+    this.paintCurrent();
     this.scrollToCurrent();
   }
 
@@ -271,9 +298,15 @@ class SearchBarController implements SearchBar {
   }
 
   // ---------- 替换功能 ----------
-  toggleReplace(): void {
+  private toggleReplace(): void {
     this.replaceVisible = !this.replaceVisible;
     this.replaceRow.style.display = this.replaceVisible ? 'flex' : 'none';
+  }
+
+  openWithReplace(): void {
+    this.show();
+    this.replaceVisible = true;
+    this.replaceRow.style.display = 'flex';
   }
 
   private replaceCurrent(): void {
@@ -289,13 +322,9 @@ class SearchBarController implements SearchBar {
       this.replaceInRenderMode(currentRange, replaceText);
     }
 
-    // 替换后重新搜索
-    this.doHighlight(this.lastKeyword);
-    if (this.totalMatches > 0) {
-      this.matchIndex = this.matchIndex > this.totalMatches ? 1 : this.matchIndex;
-      this.matchCount.textContent = `${this.matchIndex}/${this.totalMatches}`;
-      this.updateHighlightIndex();
-    }
+    // 替换后重新搜索：**保持原序号**（替换第 5/10 处后仍指向下一处，
+    // 旧实现重扫后 matchIndex 回 1——连替多处时高亮跳回第 1 处）
+    this.doHighlight(this.lastKeyword, { keepIndex: true });
   }
 
   private replaceAllMatches(): void {
@@ -380,18 +409,31 @@ class SearchBarController implements SearchBar {
     insertTextViaInputEvent(sourceEl, result);
   }
 
+  /**
+   * 高亮 Range → PM 文档位置。posAtDOM 对"编辑器外节点 / 陈旧 Range"直接
+   * 抛 RangeError（prosemirror-view：`DOM position not inside the editor`）——
+   * 搜索栏没有文档变更订阅时 Range 必然陈旧，旧代码 `if (pmFrom < 0)` 是
+   * 永不生效的死护栏（posAtDOM 只抛错不返回负数），异常一路抛穿点击处理器。
+   * 换算失败返回 null 由调用方跳过该匹配。
+   */
+  private toPmRange(view: EditorView, range: Range): { from: number; to: number } | null {
+    try {
+      const from = view.posAtDOM(range.startContainer, range.startOffset);
+      const to = view.posAtDOM(range.endContainer, range.endOffset);
+      return { from, to };
+    } catch {
+      return null;
+    }
+  }
+
   private replaceInRenderMode(range: Range, replaceText: string): void {
     this.editor.action((ctx) => {
       const view = ctx.get(editorViewCtx);
-
-      // 使用 ProseMirror 的 posAtDOM 方法找到位置
-      const pmFrom = view.posAtDOM(range.startContainer, range.startOffset);
-      const pmTo = view.posAtDOM(range.endContainer, range.endOffset);
-
-      if (pmFrom < 0 || pmTo < 0) return;
+      const pm = this.toPmRange(view, range);
+      if (!pm) return;
 
       // 创建替换事务
-      const tr = view.state.tr.insertText(replaceText, pmFrom, pmTo);
+      const tr = view.state.tr.insertText(replaceText, pm.from, pm.to);
       view.dispatch(tr);
     });
   }
@@ -401,15 +443,14 @@ class SearchBarController implements SearchBar {
       const view = ctx.get(editorViewCtx);
       let tr = view.state.tr;
 
-      // 从后往前替换，避免位置偏移
+      // 从后往前替换，避免位置偏移（匹配区间已保证非重叠，
+      // 反向 insertText 不会互相踩踏）
       const ranges = [...this.currentRanges].reverse();
       for (const range of ranges) {
-        const pmFrom = view.posAtDOM(range.startContainer, range.startOffset);
-        const pmTo = view.posAtDOM(range.endContainer, range.endOffset);
+        const pm = this.toPmRange(view, range);
+        if (!pm) continue;
 
-        if (pmFrom < 0 || pmTo < 0) continue;
-
-        tr = tr.insertText(replaceText, pmFrom, pmTo);
+        tr = tr.insertText(replaceText, pm.from, pm.to);
       }
 
       view.dispatch(tr);

@@ -7,12 +7,32 @@
 /** 可打开的 Markdown 扩展名（小写、带点） */
 export const MARKDOWN_EXTENSIONS = ['.md', '.markdown', '.mdown'] as const;
 
-/** 判断路径是否为受支持的 Markdown 文件 */
-export function isMarkdownPath(filePath: string): boolean {
+/**
+ * 可打开文档扩展名 = Markdown + 纯文本。
+ * MD_FILTERS 里还有「所有文件」（用户可在打开框里选任意文件），但 IPC 读写与
+ * win:set-path 登记统一收口到这一口径——file:write 若不限扩展名就是"渲染层被
+ * 攻破即可覆写任意绝对路径文件"。主进程侧（read-content / read-quiet / write /
+ * win:set-path / show-in-folder / open-in-new-window / 会话与最近文件过滤）统一用
+ * isOpenablePath，勿再各自内联 isMarkdownPath 造成口径漂移。
+ */
+export const OPENABLE_EXTENSIONS = [...MARKDOWN_EXTENSIONS, '.txt'] as const;
+
+/** 按扩展名（小写、带点）匹配路径尾部 */
+function hasExtension(filePath: string, extensions: readonly string[]): boolean {
   const dot = filePath.lastIndexOf('.');
   if (dot < 0) return false;
   const ext = filePath.slice(dot).toLowerCase();
-  return (MARKDOWN_EXTENSIONS as readonly string[]).includes(ext);
+  return extensions.includes(ext);
+}
+
+/** 判断路径是否为受支持的 Markdown 文件 */
+export function isMarkdownPath(filePath: string): boolean {
+  return hasExtension(filePath, MARKDOWN_EXTENSIONS);
+}
+
+/** 判断路径是否为可打开文档（Markdown + txt，见 OPENABLE_EXTENSIONS） */
+export function isOpenablePath(filePath: string): boolean {
+  return hasExtension(filePath, OPENABLE_EXTENSIONS);
 }
 
 /** 文件对话框统一过滤器（扩展名由 MARKDOWN_EXTENSIONS 推导，去点） */
@@ -102,10 +122,17 @@ export function isConfirmDialogPayload(value: unknown): value is ConfirmDialogPa
   return (
     typeof message === 'string' &&
     Array.isArray(buttons) &&
+    // 原生确认框按钮数有上限（Windows 任务对话框 >4 视觉退化），载荷同样限死；
+    // cancelId 必须落在按钮下标范围内——越界会让 showMessageBox 抛错/静默错位
     buttons.length > 0 &&
+    buttons.length <= 4 &&
     buttons.every((b) => typeof b === 'string') &&
     (detail === undefined || typeof detail === 'string') &&
-    (cancelId === undefined || typeof cancelId === 'number')
+    (cancelId === undefined ||
+      (typeof cancelId === 'number' &&
+        Number.isInteger(cancelId) &&
+        cancelId >= 0 &&
+        cancelId < buttons.length))
   );
 }
 
@@ -156,12 +183,9 @@ export const IMAGE_EXTENSIONS = [
   '.tiff'
 ] as const;
 
-/** 文件名是否为受支持的图片 */
-export function isImagePath(fileName: string): boolean {
-  const dot = fileName.lastIndexOf('.');
-  if (dot < 0) return false;
-  const ext = fileName.slice(dot).toLowerCase();
-  return (IMAGE_EXTENSIONS as readonly string[]).includes(ext);
+/** 路径（或纯文件名）是否为受支持的图片（按扩展名判断） */
+export function isImagePath(filePath: string): boolean {
+  return hasExtension(filePath, IMAGE_EXTENSIONS);
 }
 
 /** 文件是否为图片（File.type 命中或扩展名命中） */
@@ -233,8 +257,9 @@ export function isExportDocumentPayload(value: unknown): value is ExportDocument
   );
 }
 
-/** docPath 字段：绝对路径字符串或 null（未保存文档） */
-export function isDocPath(value: unknown): value is string | null {
+/** docPath 字段：字符串或 null（绝对性由调用方校验，见 images.ts validDocPath）。
+ *  仅本文件的图片载荷守卫使用，不导出。 */
+function isDocPath(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
 }
 
@@ -309,6 +334,9 @@ export function isUpdateDownloadState(value: unknown): value is UpdateDownloadSt
   }
 }
 
+/** 页面缩放动作（键位映射与内容区缩放共用；百分比语义见 shared/zoomKeys.ts） */
+export type ZoomAction = 'in' | 'out' | 'reset';
+
 /** 菜单命令名：主进程发送端与渲染层路由接收端共用，防拼写漂移 */
 export type CommandName =
   | 'new-file'
@@ -346,6 +374,9 @@ export type CommandName =
   | 'view:focus-mode'
   | 'view:typewriter-mode'
   | 'view:background-settings'
+  | 'view:zoom-in'
+  | 'view:zoom-out'
+  | 'view:zoom-reset'
   | 'edit:spellcheck'
   | 'edit:auto-pairs'
   | 'file:open-smart'

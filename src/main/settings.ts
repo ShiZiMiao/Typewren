@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, session } from 'electron';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 
@@ -14,7 +14,14 @@ import { DEFAULT_SETTINGS, sanitizeSettings, type AppSettings } from '../shared/
  * 渲染层的设置状态以 settings:updated 广播为时钟（仿 nativeTheme 时序）。
  * ============================================================ */
 
+/** 写盘防抖：设置对话框逐击键发 set（每击都落盘太吵），合并成最后一次。
+ *  广播与副作用保持即时，只有落盘被合并。 */
+const SAVE_DEBOUNCE_MS = 300;
+
 let cache: AppSettings | null = null;
+let saveTimer: NodeJS.Timeout | null = null;
+/** 写盘串行链（防快速连改时上一次写还在途、旧值晚到覆盖） */
+let writeChain: Promise<void> = Promise.resolve();
 
 function settingsFile(): string {
   return join(app.getPath('userData'), 'settings.json');
@@ -32,12 +39,42 @@ export function loadSettings(): AppSettings {
   return cache;
 }
 
-/** 写盘（异步，失败静默）并更新进程缓存 */
+/** 更新进程内缓存并（防抖）落盘 */
 export function saveSettings(next: AppSettings): void {
   cache = next;
-  void fsp.writeFile(settingsFile(), JSON.stringify(next, null, 2), 'utf-8').catch(() => {
-    // 设置是偏好功能，写失败不打扰（下次启动回落上次成功值）
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    enqueueWrite();
+  }, SAVE_DEBOUNCE_MS);
+}
+
+/** 串行落盘：写的内容取执行时刻的缓存（永远最新），旧写不可能覆新 */
+function enqueueWrite(): void {
+  writeChain = writeChain.then(() => {
+    const snapshot = cache;
+    if (!snapshot) return;
+    return fsp
+      .writeFile(settingsFile(), JSON.stringify(snapshot, null, 2), 'utf-8')
+      .catch(() => {
+        // 设置是偏好功能，写失败不打扰（下次启动回落上次成功值）
+      });
   });
+}
+
+/** 立即落盘（before-quit 用：防抖定时器可能赶不上退出；同步写） */
+export function flushSettings(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  const snapshot = cache;
+  if (!snapshot) return;
+  try {
+    writeFileSync(settingsFile(), JSON.stringify(snapshot, null, 2), 'utf-8');
+  } catch {
+    // ignore
+  }
 }
 
 /** 应用设置的主进程侧副作用（主题 / 拼写检查会话域） */
@@ -51,6 +88,8 @@ export function applySettingsSideEffects(settings: AppSettings): void {
 }
 
 export function registerSettingsIpc(): void {
+  // 退出前冲刷防抖落盘（改完设置立即退出的场景，300ms 定时器赶不上）
+  app.on('before-quit', () => flushSettings());
   ipcMain.handle('settings:get', () => sanitizeSettings(loadSettings()));
   ipcMain.on('settings:set', (_event, raw: unknown) => {
     const next = sanitizeSettings(raw);

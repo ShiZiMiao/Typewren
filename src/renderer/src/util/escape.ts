@@ -1,5 +1,8 @@
 /* ============================================================
  * HTML 转义工具（KaTeX 错误回显 / 导出标题等场景复用）
+ * 五种字符全转义：& < > " ' ——单引号也必须转（&#39;），否则未来把输出
+ * 嵌进单引号属性（attr='…'）时被注入属性边界；当前调用点多在文本节点
+ * 或双引号属性内，但注释宣称多场景复用，口径一步到位。
  * ============================================================ */
 
 export function escapeHtml(text: string): string {
@@ -7,5 +10,6 @@ export function escapeHtml(text: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }

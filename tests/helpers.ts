@@ -1,5 +1,8 @@
 import { _electron as electron } from '@playwright/test';
-import type { ElectronApplication, Page } from 'playwright';
+import type { ElectronApplication, Page } from '@playwright/test';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /* ============================================================
  * 测试公共辅助
@@ -16,7 +19,14 @@ export const OUT_MAIN = `${__dirname}/../out/main/index.js`;
 
 /** 启动测试用 Electron 实例（--test 模式：跳过关闭保护、导出直写临时目录） */
 export async function launchApp(extraArgs: string[] = []): Promise<AppHandle> {
-  const app = await electron.launch({ args: ['--test', OUT_MAIN, ...extraArgs] });
+  // 默认注入隔离 user-data-dir：--test 只关 session/drafts/关闭保护，settings.json、
+  // localStorage 镜像、userData/images 仍会写真实用户目录——不隔离的话跑一遍测试
+  // 就污染开发机配置（主题设置/背景图被改写）。调用方自带 --user-data-dir= 时尊重之。
+  const hasUserDataDir = extraArgs.some((a) => a.startsWith('--user-data-dir='));
+  const isolatedArgs = hasUserDataDir
+    ? []
+    : [`--user-data-dir=${mkdtempSync(join(tmpdir(), 'typewren-test-'))}`];
+  const app = await electron.launch({ args: ['--test', OUT_MAIN, ...extraArgs, ...isolatedArgs] });
   const window = await app.firstWindow();
   await window.waitForLoadState('domcontentloaded');
   await window.waitForSelector('.ProseMirror', { timeout: 15000 });
@@ -61,7 +71,7 @@ async function settleContent(window: Page, content: string): Promise<void> {
         await window.waitForFunction(
           (p) => {
             const el = document.querySelector('.ProseMirror');
-            return el !== null && el.textContent!.includes(p);
+            return el !== null && el.textContent!.replace(/\s+/g, '').includes(p);
           },
           needle,
           { timeout: 6000 }
@@ -85,6 +95,22 @@ export function sendCommand(handle: AppHandle, name: string, payload?: unknown):
   );
 }
 
+/* ---------- 源码视图读写（#source-textarea 是 contenteditable div 的实现细节，
+ * 各 spec 不要直接摸它，经此收口便于未来换回 textarea.value） ---------- */
+
+export function readSource(handle: AppHandle): Promise<string> {
+  return handle.window.evaluate(
+    () => document.querySelector('#source-textarea')?.textContent ?? ''
+  );
+}
+
+export function writeSource(handle: AppHandle, text: string): Promise<void> {
+  return handle.window.evaluate((t) => {
+    const el = document.querySelector('#source-textarea');
+    if (el) el.textContent = t;
+  }, text);
+}
+
 /* ---------- 原生对话框打桩（主进程内替换 electron.dialog 方法） ---------- */
 
 export interface DialogConfig {
@@ -100,7 +126,7 @@ export interface DialogConfig {
 
 export function installDialogStubs(handle: AppHandle, cfg: DialogConfig = {}): Promise<void> {
   return handle.app.evaluate(({ dialog: d }, init) => {
-    const g = globalThis as { __dlg: { cfg: Record<string, unknown> } };
+    const g = globalThis as unknown as { __dlg: { cfg: Record<string, unknown> } };
     g.__dlg = { cfg: { saveAs: null, open: null, discard: 1, confirm: 0, ...init } };
     // 注意：本回调会被序列化到主进程执行，只能引用自身/参数内的符号
     const pick = (args: unknown[]): number => {
@@ -131,7 +157,7 @@ export function installDialogStubs(handle: AppHandle, cfg: DialogConfig = {}): P
 
 export function setDialog(handle: AppHandle, cfg: Partial<DialogConfig>): Promise<void> {
   return handle.app.evaluate((_, patch) => {
-    const g = globalThis as { __dlg: { cfg: Record<string, unknown> } };
+    const g = globalThis as unknown as { __dlg: { cfg: Record<string, unknown> } };
     Object.assign(g.__dlg.cfg, patch);
   }, cfg);
 }

@@ -43,6 +43,24 @@ test('命令行参数打开 Markdown 文件', async () => {
   }
 });
 
+test('单横线文件名参数可打开（只跳过 -- 开头的开关参数）', async () => {
+  // 回归：参数扫描曾跳过所有 '-' 开头的参数，`typewren -notes.md` 这类
+  // 单横线命名的文件打不开；现仅跳过 '--' 开头的开关，其余按扩展名白名单判定
+  const relName = '-notes.md';
+  writeFileSync(join(WORK_DIR, relName), '# 单横线文件名\n\n正文内容', 'utf-8');
+  const app = await electron.launch({
+    args: ['--test', OUT_MAIN, relName],
+    // 相对路径参数按进程 cwd 解析（模拟 shell 里 `typewren -notes.md`）
+    cwd: WORK_DIR
+  });
+  const window = await app.firstWindow();
+  try {
+    await expectHeadingInWindow(window, '单横线文件名');
+  } finally {
+    await app.close().catch(() => {});
+  }
+});
+
 test('二次启动实例把文件交给首实例：新开窗口打开（second-instance 接线）', async () => {
   const first = await launchApp();
   try {

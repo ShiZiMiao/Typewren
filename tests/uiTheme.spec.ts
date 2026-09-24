@@ -15,9 +15,9 @@ async function readTheme(): Promise<string> {
   return app.window.evaluate(() => document.documentElement.dataset.theme ?? 'light');
 }
 
-/** 状态栏按钮无 id，用 title 定位主题切换按钮（标题随主题变化，含"主题"关键字） */
+/** 主题切换按钮按稳定 id 定位（旧实现按中文 title 文案定位，文案一改即全断） */
 const themeButton = (): ReturnType<typeof app.window.locator> =>
-  app.window.locator('#status-bar button[title*="主题"]');
+  app.window.locator('#btn-theme-toggle');
 
 test.describe('主题切换', () => {
   test('按钮切换亮/暗主题且 DOM 同步', async () => {
@@ -73,12 +73,49 @@ test.describe('布局骨架', () => {
     expect(labels).toEqual(['文件', '编辑', '格式', '段落', '视图', '帮助']);
   });
 
-  test('自绘菜单栏点击调用 popupMenu（smoke）', async () => {
-    // 点击「文件」触发 menu:popup IPC，主进程弹原生子菜单；无异常即通过
-    await app.window.locator('#menubar .menubar-item', { hasText: '文件' }).click();
-    await app.window.waitForTimeout(300);
-    // 收起原生菜单，避免遮挡后续交互
+  test('编辑区与状态栏可见', async () => {
+    await expect(app.window.locator('#editor-container')).toBeVisible();
+    await expect(app.window.locator('#status-bar')).toBeVisible();
+  });
+
+  test('自绘菜单栏点击走 popupMenu 参数链路（--test 不真弹）', async () => {
+    // --test 下主进程 registerMenuPopup 参数校验后直接 return（不真弹，
+    // 防测试把原生菜单弹到屏幕左上角）；可观察部分逐项断言（旧用例零断言）：
+    // ① 点击处理器在 popupMenu 调用之后才给按钮加 .open 高亮（同步生命周期）
+    const item = app.window.locator('#menubar .menubar-item', { hasText: '文件' });
+    await item.click();
+    await expect(item).toHaveClass(/open/);
+    // 高亮 800ms 后自动去除
+    await app.window.waitForTimeout(1000);
+    await expect(item).not.toHaveClass(/open/);
     await app.window.keyboard.press('Escape');
+
+    // ② 参数归一化路径（主进程 normalizePopupPosition：小数坐标取整 /
+    // zoomFactor 换算 / NaN 拒收）——小数坐标、未知顶级项、缺 states 直发 IPC，
+    // 主进程不得抛错（历史坑：小数坐标 gin 转换失败弹 conversion failure）
+    await app.window.evaluate(() =>
+      (
+        window as unknown as {
+          typewren: {
+            popupMenu: (label: string, x: number, y: number, states?: Record<string, boolean>) => void;
+          };
+        }
+      ).typewren.popupMenu('文件', 7.5, 300.25, { 'view:focus-mode': true })
+    );
+    await app.window.evaluate(() =>
+      (
+        window as unknown as {
+          typewren: {
+            popupMenu: (label: string, x: number, y: number, states?: Record<string, boolean>) => void;
+          };
+        }
+      ).typewren.popupMenu('不存在的顶级项', 10, 10, undefined)
+    );
+    // ③ 主进程与窗口保持健康（IPC 已被处理且无 conversion failure）
+    const alive = await app.app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows().map((w) => !w.isDestroyed())
+    );
+    expect(alive.every(Boolean)).toBe(true);
   });
 
   test('状态栏字数随输入更新', async () => {
@@ -323,6 +360,65 @@ test.describe('大纲面板', () => {
       (el as HTMLElement).scrollTop = (el as HTMLElement).scrollHeight;
     });
     await expect(items.nth(11)).toHaveClass(/active/, { timeout: 3000 });
+  });
+
+  test('回归：zoom 120% 大纲跳转落点与滚动目标（屏幕/局部单位混用）', async () => {
+    await ensureOutlineOpen();
+    // 内容区缩放到 120%（步进 10 个百分点 ×2）
+    await sendCommand(app, 'view:zoom-in');
+    await sendCommand(app, 'view:zoom-in');
+    await app.window.waitForTimeout(200);
+
+    await loadContent(app, longSectionsDoc());
+    const items = app.window.locator('#outline-tree .outline-item');
+    await expect(items).toHaveCount(12, { timeout: 5000 });
+
+    // 打桩 scrollTo 捕获滚动目标：无头下 smooth 被 Chromium 禁用（scrollTop 不动），
+    // 无法从滚动结果反推目标；调用参数是唯一可观察点
+    await app.window.locator('#editor-container').evaluate((el) => {
+      const w = el as unknown as {
+        scrollTo: (opts?: ScrollToOptions | number) => void;
+        __captured?: number[];
+      };
+      w.__captured = [];
+      w.scrollTo = (opts?: ScrollToOptions | number) => {
+        const top = typeof opts === 'number' ? opts : (opts?.top ?? 0);
+        w.__captured!.push(top);
+      };
+    });
+
+    await items.nth(9).evaluate((el) => (el as HTMLButtonElement).click());
+    await app.window.waitForTimeout(1000);
+
+    // 落点：光标应落在第 10 章标题（跳转链路在 zoom 下无回归）
+    const caretHeading = await app.window.evaluate(() => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return '';
+      const node = sel.getRangeAt(0).startContainer;
+      const el = node instanceof HTMLElement ? node : node.parentElement;
+      return el?.closest('h1,h2,h3,h4,h5,h6')?.textContent ?? '';
+    });
+    expect(caretHeading).toContain('第 10 章');
+
+    // 滚动目标必须是**局部单位**的标题偏移：rect 差值是屏幕像素（zoom 子树内
+    // ×1.2），旧行未 ÷zoom 直接加 scrollTop，落点偏移 zoom 倍（放大过冲）
+    const { captured, expected } = await app.window.evaluate(() => {
+      const container = document.getElementById('editor-container')!;
+      const heading = container.querySelectorAll('h1, h2, h3, h4, h5, h6')[9];
+      const zoom = parseFloat(getComputedStyle(container).getPropertyValue('zoom')) || 1;
+      const localOffset =
+        (heading.getBoundingClientRect().top - container.getBoundingClientRect().top) / zoom +
+        container.scrollTop;
+      return {
+        captured: (container as unknown as { __captured?: number[] }).__captured ?? [],
+        expected: localOffset
+      };
+    });
+    expect(expected).toBeGreaterThan(50); // 长文档第 10 章确有明显偏移（断言才有意义）
+    expect(captured.some((top) => Math.abs(top - expected) <= 2)).toBe(true);
+
+    // 恢复缩放，避免影响后续用例
+    await sendCommand(app, 'view:zoom-reset');
   });
 });
 

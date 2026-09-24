@@ -3,15 +3,16 @@ import { editorViewCtx } from '@milkdown/kit/core';
 import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import { TextSelection } from '@milkdown/kit/prose/state';
 
+import { screenPxToLocal } from './zoom';
+
 /* ============================================================
  * 渲染 ↔ 源码视图的位置同步
  *
  * 动机：切换视图时用户希望光标/视口停在文档的**同一处**。
  * 两侧没有可逆的逐字符映射（渲染文本 ≠ Markdown 源码），
- * 故采用"块级锚点 + 行/块文本匹配 + 比例兜底"三级策略：
- *   1) 行文本精确/包含匹配（最常见，最准）；
- *   2) 剥离 Markdown 标记后匹配，容忍源码与序列化的转义差异；
- *   3) 按块序号/行号比例落点（编辑造成失配时的兜底，保证总有目标）。
+ * 故采用"文本匹配 + 比例兜底"两级策略：
+ *   1) 剥离 Markdown 标记后的块/行文本匹配（精确/包含两档打分，最常见也最准）；
+ *   2) 按块序号/行号比例落点（编辑造成失配时的兜底，保证总有目标）。
  * ============================================================ */
 
 /**
@@ -134,10 +135,14 @@ function scrollSourceCaretIntoView(
   const rect = selection.getRangeAt(0).getBoundingClientRect();
   const containerRect = el.getBoundingClientRect();
   if (containerRect.height > 0 && rect.height > 0) {
+    // rect 差值是屏幕像素（zoom 子树内 ×zoom），scrollTop 是局部单位——
+    // 必须 ÷zoom 换算再相加（zoom≠100% 时旧公式偏移 zoom 倍）；
+    // 容器高度用 clientHeight（恒为局部单位），不再混入 rect 的屏幕像素
+    const local = (screenPx: number): number => screenPxToLocal(el, screenPx);
     const target =
       align === 'center'
-        ? el.scrollTop + (rect.top - containerRect.top) - containerRect.height / 2 + rect.height / 2
-        : el.scrollTop + (rect.top - containerRect.top);
+        ? el.scrollTop + local(rect.top - containerRect.top) - el.clientHeight / 2 + local(rect.height) / 2
+        : el.scrollTop + local(rect.top - containerRect.top);
     el.scrollTo({ top: Math.max(0, target), behavior });
   }
 }
@@ -151,10 +156,8 @@ export interface SourceExitAnchor {
 
 /** 进入源码模式时捕获的渲染侧锚点（光标所在块） */
 export interface EditorAnchor {
-  /** 光标所在 textblock 的纯文本 */
+  /** 光标所在 textblock 的纯文本（depth-0 选区无 textblock 祖先时为空串） */
   blockText: string;
-  /** 光标距块起点的偏移（行内落点精修备用） */
-  offset: number;
   /** 光标所在顶层块序号 / 块总数（比例兜底） */
   blockIndex: number;
   blockCount: number;
@@ -164,7 +167,13 @@ export interface EditorAnchor {
 export function captureEditorAnchor(editor: Editor): EditorAnchor {
   const state = editor.action((ctx) => ctx.get(editorViewCtx).state);
   const $from = state.selection.$from;
-  const blockStart = $from.start(1);
+
+  // depth 0 = NodeSelection 顶到文档层（点选图片 / 整表 / TOC 跳转后）：
+  // 没有 textblock 祖先，parent 是 doc（textContent 变全文）、start(1) 越界
+  // 得 undefined（块序号算成 NaN 全灭）——块文本锚点只在 depth≥1 时有意义，
+  // depth 0 留空走比例兜底；块序号改用 $from.pos（选中节点前的边界）依旧可算。
+  const blockText = $from.depth >= 1 ? $from.parent.textContent : '';
+  const blockStart = $from.depth >= 1 ? $from.start(1) : $from.pos;
 
   let blockIndex = 0;
   let counted = 0;
@@ -176,17 +185,15 @@ export function captureEditorAnchor(editor: Editor): EditorAnchor {
   });
 
   return {
-    blockText: $from.parent.textContent,
-    offset: $from.parentOffset,
+    blockText,
     blockIndex,
     blockCount: state.doc.childCount
   };
 }
 
-/** 渲染锚点 → 源码文本中的字符偏移（匹配失败用比例兜底；空文档返回 null） */
-export function anchorToSourceCaret(text: string, anchor: EditorAnchor): number | null {
+/** 渲染锚点 → 源码文本中的字符偏移（匹配失败用比例兜底） */
+export function anchorToSourceCaret(text: string, anchor: EditorAnchor): number {
   const lines = sourceLines(text);
-  if (lines.length === 0) return null;
   if (anchor.blockCount === 0) return 0;
 
   // 1) 行文本匹配：光标块首行剥离标记后的片段，找包含它的源码行
@@ -235,7 +242,10 @@ export function placeEditorCursor(editor: Editor, anchor: SourceExitAnchor): voi
     else if (text.includes(needle)) score = 2;
     else if (needle.length >= 4 && needle.includes(text)) score = 1;
     if (score > 0 && (best === null || score > best.score)) {
-      const inner = text.indexOf(needle);
+      // 行内落点：在**原始 textContent** 上找 needle 的字符偏移——text 是剥离
+      // 标记后的副本，其 indexOf 是"剥离坐标"，块内含被剥掉的语法壳时整体错位
+      // （旧实现把剥离索引当原始偏移用）。needle 只存在于剥离视图时落块首。
+      const inner = node.textContent.indexOf(needle);
       best = { pos: pos + 1, inner: inner >= 0 ? inner : 0, score };
     }
   });

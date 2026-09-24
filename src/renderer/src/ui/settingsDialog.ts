@@ -9,17 +9,20 @@ import { getAppSettings, subscribeAppSettings, updateAppSettings } from '@/servi
 /* ============================================================
  * 偏好设置对话框（自研 DOM 模态，仿 promptDialog）
  * - 修改即时生效：控件事件 → updateAppSettings（本地立即应用 + 主进程持久化/广播）
- * - Enter / Esc / 点遮罩 / 「关闭」均可关闭（与 promptDialog 交互一致）
+ * - Esc / 点遮罩 / 「关闭」均可关闭（表单内 Enter 归各控件，如 select 展开，
+ *   不做全局 Enter 关闭——打字途中误触就把设置页关了）
  * - 设置存储广播后重建控件值（多窗口一致）；聚焦中的控件不被打断
  * ============================================================ */
 
 export class SettingsDialog {
   private overlay: HTMLDivElement | null = null;
   private unsubscribe: (() => void) | null = null;
+  /** 打开前的焦点元素（所有关闭路径统一还原，含 Esc） */
+  private previousFocus: HTMLElement | null = null;
 
   open(): void {
     if (this.overlay) return;
-    const previousFocus = document.activeElement as HTMLElement | null;
+    this.previousFocus = document.activeElement as HTMLElement | null;
 
     const overlay = document.createElement('div');
     overlay.className = 'settings-overlay';
@@ -123,7 +126,8 @@ export class SettingsDialog {
     btnReset.type = 'button';
     btnReset.className = 'prompt-btn';
     btnReset.textContent = '恢复默认';
-    btnReset.title = '恢复本窗口所有设置到默认值';
+    // updateAppSettings 经 settings:updated 广播全窗口——生效范围是所有窗口
+    btnReset.title = '恢复所有窗口的设置到默认值';
     btnReset.addEventListener('click', () => {
       updateAppSettings({ ...DEFAULT_SETTINGS });
     });
@@ -139,23 +143,20 @@ export class SettingsDialog {
     overlay.append(dialog);
     document.body.append(overlay);
 
-    const close = (): void => {
-      this.close();
-      if (previousFocus && previousFocus.isConnected) previousFocus.focus();
-    };
-
-    btnCancel.addEventListener('click', close);
+    btnCancel.addEventListener('click', () => this.close());
     overlay.addEventListener('click', (event) => {
-      if (event.target === overlay) close();
+      if (event.target === overlay) this.close();
     });
     document.addEventListener('keydown', this.onKeydown);
     this.unsubscribe = subscribeAppSettings(() => this.render());
 
     this.overlay = overlay;
     this.render();
-    requestAnimationFrame(() => {
+    // setTimeout(0) 而非 rAF：无头/后台窗口 rAF 被 Chromium 节流，
+    // 初始聚焦可能永不执行（与 promptDialog/sourceMode 同一坑）
+    window.setTimeout(() => {
       dialog.querySelector<HTMLSelectElement>('#settings-font-family')?.focus();
-    });
+    }, 0);
   }
 
   private onKeydown = (event: KeyboardEvent): void => {
@@ -169,6 +170,11 @@ export class SettingsDialog {
     this.overlay = null;
     this.unsubscribe?.();
     this.unsubscribe = null;
+    // 所有关闭路径（按钮/遮罩/Esc）统一还原焦点——旧实现 Esc 直接 close()
+    // 跳过了还原，焦点留在已移除的节点上就近丢失
+    const previousFocus = this.previousFocus;
+    this.previousFocus = null;
+    if (previousFocus && previousFocus.isConnected) previousFocus.focus();
   }
 
   /** 按当前设置重建控件值（聚焦中的控件不打断输入） */
@@ -265,8 +271,14 @@ export class SettingsDialog {
     input.step = String(step);
     input.className = 'settings-input';
     input.addEventListener('input', () => {
-      const value = Number(input.value);
-      if (Number.isFinite(value)) onChange(value);
+      // 空串/半成品不提交：Number('') === 0 会把 0 灌进设置（旧实现每键即提交，
+      // 清空输入框的一瞬产生瞬时越界值 + 每键一次 IPC）。仅接受 [min,max] 内的
+      // 有限数；越界/非法输入保持输入框原样，补全合法值后再生效
+      const raw = input.value.trim();
+      if (raw === '') return;
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value < min || value > max) return;
+      onChange(value);
     });
     return this.row(labelText, input);
   }

@@ -19,6 +19,7 @@ import {
 
 import type { ExportDocumentPayload, ExportDocumentResult } from '../shared/ipc';
 import { isExportDocumentPayload } from '../shared/ipc';
+import { isTestMode } from './runMode';
 
 /* ============================================================
  * 导出 PDF / HTML / Docx / PNG（主进程侧）
@@ -63,6 +64,51 @@ function runOf(t: DocxTextLike): TextRun {
   });
 }
 
+/** 行内 run 逐字段 shape 归一（IPC 载荷不可信：畸形字段丢弃，不让 docx 库抛错） */
+function normalizeRuns(value: unknown): DocxTextLike[] {
+  if (!Array.isArray(value)) return [];
+  const out: DocxTextLike[] = [];
+  for (const raw of value) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const r = raw as Record<string, unknown>;
+    const run: DocxTextLike = { text: typeof r.text === 'string' ? r.text : '' };
+    if (typeof r.bold === 'boolean') run.bold = r.bold;
+    if (typeof r.italic === 'boolean') run.italic = r.italic;
+    if (typeof r.strike === 'boolean') run.strike = r.strike;
+    if (typeof r.code === 'boolean') run.code = r.code;
+    if (typeof r.underline === 'boolean') run.underline = r.underline;
+    if (typeof r.href === 'string') run.href = r.href;
+    out.push(run);
+  }
+  return out;
+}
+
+/** docxBlocks 逐层 shape 归一：块/行内 run 的字段一律按 typeof 归一，
+ *  类型不对的字段丢弃或回落默认值（渲染层载荷经 IPC 可能被篡改/畸形，
+ *  裸 `as DocxBlockLike[]` 会把任意对象交给 docx 库构造，异常难定位） */
+function normalizeDocxBlocks(value: unknown): DocxBlockLike[] {
+  if (!Array.isArray(value)) return [];
+  const blocks: DocxBlockLike[] = [];
+  for (const raw of value) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const b = raw as Record<string, unknown>;
+    const block: DocxBlockLike = { type: typeof b.type === 'string' ? b.type : 'paragraph' };
+    if (typeof b.level === 'number') block.level = b.level;
+    if (b.runs !== undefined) block.runs = normalizeRuns(b.runs);
+    if (typeof b.bullet === 'string') block.bullet = b.bullet;
+    if (typeof b.checked === 'boolean') block.checked = b.checked;
+    if (typeof b.quote === 'boolean') block.quote = b.quote;
+    if (typeof b.text === 'string') block.text = b.text;
+    if (typeof b.language === 'string') block.language = b.language;
+    if (typeof b.header === 'boolean') block.header = b.header;
+    if (Array.isArray(b.rows)) {
+      block.rows = b.rows.map((row) => (Array.isArray(row) ? row.map(normalizeRuns) : []));
+    }
+    blocks.push(block);
+  }
+  return blocks;
+}
+
 function runsOf(runs: DocxTextLike[] = []): (TextRun | ExternalHyperlink)[] {
   const out: (TextRun | ExternalHyperlink)[] = [];
   for (const t of runs) {
@@ -82,18 +128,13 @@ function runsOf(runs: DocxTextLike[] = []): (TextRun | ExternalHyperlink)[] {
 
 function paragraphOf(block: DocxBlockLike): Paragraph {
   if (block.quote) {
-    const quoteParas: Paragraph[] = [];
-    const runs = runsOf(block.runs);
-    quoteParas.push(
-      new Paragraph({
-        children: runs,
-        indent: { left: 720 },
-        border: {
-          left: { style: BorderStyle.SINGLE, size: 12, color: 'CCCCCC', space: 6 }
-        }
-      })
-    );
-    return quoteParas[0];
+    return new Paragraph({
+      children: runsOf(block.runs),
+      indent: { left: 720 },
+      border: {
+        left: { style: BorderStyle.SINGLE, size: 12, color: 'CCCCCC', space: 6 }
+      }
+    });
   }
 
   if (block.bullet === 'task') {
@@ -375,6 +416,35 @@ async function printHtmlToPdf(html: string, destPath: string): Promise<void> {
 }
 
 /**
+ * 等导出页渲染就绪再截图：KaTeX 字体 + 全部 <img> 解码完成。
+ * 固定 150ms 等待在慢机器上会截到半成品（字体未替换/图片未解码）；
+ * executeJavaScript 轮询就绪信号，超时兜底（外链图失败不能把导出挂死）。
+ */
+async function waitForRenderReady(contents: Electron.WebContents, timeoutMs = 5000): Promise<void> {
+  await contents.executeJavaScript(`
+    Promise.race([
+      (async () => {
+        if (document.fonts && document.fonts.ready) { await document.fonts.ready; }
+        await Promise.all(Array.from(document.images).map((img) =>
+          typeof img.decode === 'function'
+            ? img.decode().catch(() => {})
+            : (img.complete
+                ? Promise.resolve()
+                : new Promise((r) => { img.onload = r; img.onerror = r; }))
+        ));
+      })(),
+      new Promise((r) => setTimeout(r, ${timeoutMs}))
+    ])
+  `);
+}
+
+/** executeJavaScript 返回值归一：非数字/NaN/Infinity 回退默认（页面可能产出任意 JS 值） */
+function normalizeSize(value: unknown, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/**
  * 整页 PNG 截图：隐藏窗口加载导入 HTML，把窗口拉到文档高度后 capturePage。
  * 长文档超出单屏高度限制时按窗口可支持的最大高度截取（保底不失败）。
  */
@@ -397,21 +467,30 @@ async function captureHtmlToPng(html: string, destPath: string): Promise<void> {
       }
     });
     await shotWin.loadFile(tempHtml);
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // 等字体/图片就绪（固定等待改就绪轮询，见函数注释）
+    await waitForRenderReady(shotWin.webContents);
 
-    const height = await shotWin.webContents.executeJavaScript(
-      'Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)'
+    const height = normalizeSize(
+      await shotWin.webContents.executeJavaScript(
+        'Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)'
+      ),
+      800
     );
     const width = Math.max(
       1200,
-      await shotWin.webContents.executeJavaScript(
-        'Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0)'
+      normalizeSize(
+        await shotWin.webContents.executeJavaScript(
+          'Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0)'
+        ),
+        1200
       )
     );
     // 窗口高度上限（Windows 单屏约 16k，留安全边际；超出部分截断）
     const boundedHeight = Math.min(Math.max(height, 800), 15000);
     shotWin.setContentSize(width, boundedHeight);
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // setContentSize 后的重排/重绘稳定等待（短固定等待可接受；
+    // 字体与图片就绪已在上面等过，这里只是布局落定）
+    await shotWin.webContents.executeJavaScript('new Promise((r) => setTimeout(r, 120))');
 
     const image = await shotWin.webContents.capturePage();
     const buffer = image.toPNG();
@@ -433,7 +512,7 @@ export function registerExportHandlers(): void {
       }
 
       // 测试模式跳过系统对话框，直接写入临时目录（供 e2e 断言导出产物）
-      const destPath = process.argv.includes('--test')
+      const destPath = isTestMode()
         ? join(
             app.getPath('temp'),
             payload.kind === 'pdf'
@@ -449,7 +528,8 @@ export function registerExportHandlers(): void {
 
       try {
         if (payload.kind === 'docx') {
-          const doc = buildDocxDoc((payload.docxBlocks ?? []) as DocxBlockLike[]);
+          // 逐层 shape 守卫（见 normalizeDocxBlocks）：不把裸断言的任意外构交给 docx 库
+          const doc = buildDocxDoc(normalizeDocxBlocks(payload.docxBlocks));
           const buffer = await Packer.toBuffer(doc);
           await fsp.writeFile(destPath, buffer);
         } else {

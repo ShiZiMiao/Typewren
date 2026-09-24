@@ -32,7 +32,7 @@ export interface TypewrenApi {
   /** --test 模式标记（关闭草稿/恢复等会写用户数据目录的副作用） */
   readonly testMode: boolean;
 
-  /** 草稿自动落盘间隔毫秒（env TYPEWREN_DRAFT_INTERVAL_MS 覆盖，测试用；空串=默认） */
+  /** 草稿自动落盘间隔毫秒（URL 参数 `--draft-interval=` 传入，window.ts→preload readLaunchParam；空串=默认） */
   readonly draftIntervalMs: string;
 
   /** 弹出原生打开对话框，读取文件内容；取消或失败返回 null */

@@ -13,6 +13,36 @@ import { resolveImageSrc } from '../../../shared/imageUrl';
  * typewren-img://local/… 交给主进程协议读盘），文档内容/序列化不动。
  * ============================================================ */
 
+const WINDOWS_ABSOLUTE = /^[A-Za-z]:[\\/]/;
+/** 历史 encodeURI 产物：`C:%5CUsers%5C…`（驱动器号 + 编码反斜杠） */
+const WINDOWS_ESCAPED_ABSOLUTE = /^[A-Za-z]:%5C/i;
+const HAS_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+
+/**
+ * Markdown 引用 → 解析前的原始路径：撤销引用侧的百分号编码
+ * （imagePasteService.encodeMarkdownPath 是编码端，两者必须成对演进）。
+ * resolveImageSrc 不做解码——%xx 会以字面量进文件路径永远找不到文件
+ * （encodeURI 的 %20 就曾让带空格的用户目录 404），故解码收口在调用侧。
+ * 判定顺序与 shared/imageUrl.resolveImageSrc 一致：盘符绝对路径（含历史
+ * %5C 形态）先于通用 scheme 判定——`C:/x` 的 `C:` 形似 scheme，把它当
+ * URL 就不还原了；真 URL（http/data 等）里 %23 是文件名的 #，解码反而
+ * 会被当 fragment，必须原样。非法转义（文件名里的裸 %）解码失败原样返回。
+ */
+export function decodeImageRef(src: string): string {
+  if (!src) return src;
+  const isLocalRef =
+    WINDOWS_ABSOLUTE.test(src) ||
+    WINDOWS_ESCAPED_ABSOLUTE.test(src) ||
+    src.startsWith('/') ||
+    !HAS_SCHEME.test(src);
+  if (!isLocalRef) return src;
+  try {
+    return decodeURIComponent(src);
+  } catch {
+    return src;
+  }
+}
+
 /** 文档目录提供器（main.ts 接线：文件服务里取当前文档绝对路径 → dirname） */
 let docDirProvider: () => string | null = () => null;
 
@@ -39,7 +69,9 @@ export const imageSrcView = $view(imageSchema.node, () => {
 
     const apply = (n: ProseNode): void => {
       const src = String(n.attrs.src ?? '');
-      img.src = resolveImageSrc(src, docDirProvider());
+      // 空 src 不赋值：img.src='' 会向页面基址发一次必然 404 的请求（噪音）
+      if (src) img.src = resolveImageSrc(decodeImageRef(src), docDirProvider());
+      else img.removeAttribute('src');
       img.alt = String(n.attrs.alt ?? '');
       img.title = String(n.attrs.title ?? '');
     };

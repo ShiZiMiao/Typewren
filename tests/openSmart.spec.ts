@@ -33,7 +33,9 @@ test.beforeAll(() => {
 test('空文档窗口：open-smart 就地打开（不新增窗口）', async () => {
   const app = await launchApp();
   try {
-    // 启动即空白文档（无路径、不脏）
+    // 启动窗口带欢迎页内容（有内容即非空文档——就地覆盖会静默丢失内容），
+    // 先注入真正空文档再验证"空文档就地打开"
+    await loadContent(app, '');
     expect(await winCount(app)).toBe(1);
 
     await sendOpenSmart(app, DOC_A);
@@ -43,6 +45,21 @@ test('空文档窗口：open-smart 就地打开（不新增窗口）', async () 
     await expect(app.window.locator('.ProseMirror h1')).toHaveText('甲文档', {
       timeout: 10000
     });
+  } finally {
+    await closeApp(app);
+  }
+});
+
+test('有内容的未保存窗口：open-smart 新窗口打开（不就地覆盖）', async () => {
+  const app = await launchApp();
+  try {
+    // 欢迎页/撤销回干净态的有内容文档不算"空文档"（fix 回归）
+    expect(await winCount(app)).toBe(1);
+
+    await sendOpenSmart(app, DOC_A);
+    await app.window.waitForTimeout(800);
+
+    expect(await winCount(app)).toBe(2);
   } finally {
     await closeApp(app);
   }

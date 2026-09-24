@@ -104,11 +104,31 @@ export function promptDialog(options: PromptDialogOptions): Promise<string | nul
     if (event.target === overlay) close(null);
   });
 
+  // Esc 兜底 + Tab 焦点圈：aria-modal 的对话框焦点不能 Tab 逃逸到背后的
+  // 编辑器（逃出后 Esc/Enter 语义全乱）。只在 输入框/取消/确定 三者间循环。
+  const focusables: HTMLElement[] = [input, btnCancel, btnOk];
+  overlay.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close(null);
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    event.preventDefault();
+    const current = focusables.indexOf(document.activeElement as HTMLElement);
+    const step = event.shiftKey ? -1 : 1;
+    // 焦点在圈外（含刚打开未聚焦）时：Tab → 首元素、Shift+Tab → 末元素
+    const next = current === -1 ? (event.shiftKey ? focusables.length - 1 : 0) : current + step;
+    focusables[(next + focusables.length) % focusables.length].focus();
+  });
+
   input.value = options.defaultValue ?? '';
-  requestAnimationFrame(() => {
+  // setTimeout(0) 而非 rAF：无头/后台窗口 rAF 被 Chromium 节流，
+  // 初始聚焦可能永不执行（测试 Esc 关闭前必须先显式 focus 的老坑）
+  window.setTimeout(() => {
     input.focus();
     input.select();
-  });
+  }, 0);
 
   return promise;
 }

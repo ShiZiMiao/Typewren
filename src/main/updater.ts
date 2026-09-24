@@ -2,9 +2,6 @@ import { app, dialog, BrowserWindow, ipcMain } from 'electron';
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import { autoUpdater, CancellationToken } from 'electron-updater';
-// CancellationError 是 electron-updater 的内部依赖（builder-util-runtime）导出，
-// 用于区分「用户取消」与「真实失败」（error 事件对取消不派发，Promise 却会拒绝）
-import { CancellationError } from 'builder-util-runtime';
 
 import type { UpdateDownloadState } from '../shared/ipc';
 
@@ -16,6 +13,8 @@ import type { UpdateDownloadState } from '../shared/ipc';
  * - 下载期间向渲染层推送进度（updater:download-state），提示卡展示
  *   并可取消；任务栏图标同步百分比进度
  * - 打包版才检查（unpackaged 即 dev/测试，自动返回）
+ * - 检查结果/错误的弹框口径由**调用链参数** silent 决定（随闭包走），
+ *   不再用全局 checkSilent——手动与静默检查并发时全局单值会串扰弹错框
  * 注意：未配置代码签名证书时，Windows 安装器会有 SmartScreen 提示，
  * 属签名证书问题，与更新器本身无关。
  * ============================================================ */
@@ -25,10 +24,11 @@ const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /** 上次检查时间戳缓存文件（userData 下） */
 const LAST_CHECK_FILE = 'last-update-check.json';
 
-/** 当前检查是否静默（决定错误/结果是否弹框） */
-let checkSilent = true;
 /** 事件只注册一次（防止重复订阅导致多弹框） */
 let eventsRegistered = false;
+/** 检查在途标志：autoUpdater.checkForUpdates 对并发调用复用同一 Promise，
+ *  每个调用方各自 then 会把"发现新版本"弹两次——检查串行化，后来者直接返回 */
+let checkInFlight = false;
 
 /** 下载状态机：idle（未下载）→ downloading（进行中）→ downloaded（已就绪待安装） */
 type DownloadPhase = 'idle' | 'downloading' | 'downloaded';
@@ -76,12 +76,26 @@ function resetDownload(): void {
   setTaskbarProgress(null);
 }
 
+/**
+ * 用户取消下载的错误判定。
+ * 坑（勿引 builder-util-runtime）：CancellationError 是 electron-updater 的传递依赖，
+ * 直接从传递依赖 import 会在依赖树调整时断掉；且该类不设 name（Error 默认 'Error'），
+ * 真实特征是 message 'cancelled'——name 匹配仅兼容可能的变体。
+ */
+function isCancellationError(error: unknown): boolean {
+  return error instanceof Error && /^cancell?ed$/i.test(error.message.trim());
+}
+
 /** 上次成功检查的时间戳（毫秒）；无记录返回 0 */
 async function lastCheckTime(): Promise<number> {
   try {
     const raw = await fsp.readFile(join(app.getPath('userData'), LAST_CHECK_FILE), 'utf-8');
-    const value = JSON.parse(raw) as { checkedAt?: unknown };
-    return typeof value.checkedAt === 'number' ? value.checkedAt : 0;
+    const parsed: unknown = JSON.parse(raw);
+    // 显式判对象再取字段：JSON.parse('null' / '[]' / '5') 都不抛异常，
+    // 靠 try/catch 兜底会把它们当合法记录读出 undefined
+    if (typeof parsed !== 'object' || parsed === null) return 0;
+    const checkedAt = (parsed as { checkedAt?: unknown }).checkedAt;
+    return typeof checkedAt === 'number' ? checkedAt : 0;
   } catch {
     return 0;
   }
@@ -127,17 +141,21 @@ function errorDetail(error: unknown): string {
 function promptInstall(version: string): void {
   const win = activeWindow();
   if (!win) return;
-  const choice = dialog.showMessageBoxSync(win, {
-    type: 'info',
-    title: 'Typewren - 更新已就绪',
-    message: `v${version} 已下载完成`,
-    detail: '重启应用即可完成安装；选择稍后则退出时自动安装。',
-    buttons: ['立即重启安装', '稍后'],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true
-  });
-  if (choice === 0) autoUpdater.quitAndInstall();
+  // 异步对话框：showMessageBoxSync 会阻塞主进程事件循环，
+  // 多窗口下其它窗口的 IPC 一起卡死（同 AGENTS 决策 #15 的关闭保护坑）
+  void (async () => {
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'info',
+      title: 'Typewren - 更新已就绪',
+      message: `v${version} 已下载完成`,
+      detail: '重启应用即可完成安装；选择稍后则退出时自动安装。',
+      buttons: ['立即重启安装', '稍后'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (response === 0) autoUpdater.quitAndInstall();
+  })();
 }
 
 /** 开始下载（用户从「发现新版本」弹框确认后调用） */
@@ -146,6 +164,8 @@ function startDownload(version: string): void {
   downloadVersion = version;
   downloadCanceled = false;
   cancelToken = new CancellationToken();
+  // 恢复"退出时自动安装"：上次取消下载时被关掉（见 cancel IPC）
+  autoUpdater.autoInstallOnAppQuit = true;
   setTaskbarProgress(0);
   notifyRenderer({ phase: 'starting', version });
 
@@ -154,7 +174,7 @@ function startDownload(version: string): void {
     .catch((error) => {
       // 真实错误由 'error' 事件兜底（它先于本 catch 派发，弹框只出一次）；
       // 用户取消（CancellationError）不算失败；这里仅防止 unhandled rejection
-      if (error instanceof CancellationError || downloadCanceled) return;
+      if (isCancellationError(error) || downloadCanceled) return;
       console.error('[updater] downloadUpdate failed:', error);
     })
     .finally(() => {
@@ -162,45 +182,15 @@ function startDownload(version: string): void {
     });
 }
 
-/** 注册更新事件（checkForUpdates 首次调用时执行一次） */
+/** 注册下载生命周期事件（checkForUpdates 首次调用时执行一次）。
+ *  检查结果（发现新版/已最新/检查失败）不在事件里处理——事件闭包拿不到
+ *  "本次检查是否静默"，一律改由 checkForUpdates 的调用链参数裁决 */
 function registerUpdaterEvents(): void {
   if (eventsRegistered) return;
   eventsRegistered = true;
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
-
-  autoUpdater.on('update-available', (info) => {
-    void markChecked();
-    // 兜底：即便状态机判断漏了，已在下载/已下载时也不再弹「发现新版本」
-    if (downloadPhase !== 'idle') return;
-    const win = activeWindow();
-    if (!win) return;
-    const choice = dialog.showMessageBoxSync(win, {
-      type: 'info',
-      title: 'Typewren - 发现新版本',
-      message: `发现新版本 v${info.version}`,
-      detail: `当前版本: v${app.getVersion()}\n\n${notesText(info.releaseNotes)}`,
-      buttons: ['下载更新', '稍后提醒'],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true
-    });
-    if (choice === 0) startDownload(info.version);
-  });
-
-  autoUpdater.on('update-not-available', () => {
-    void markChecked();
-    if (!checkSilent) {
-      showBox({
-        type: 'info',
-        title: 'Typewren',
-        message: '当前已是最新版本',
-        detail: `Typewren v${app.getVersion()}`,
-        buttons: ['确定']
-      });
-    }
-  });
 
   autoUpdater.on('download-progress', (progress) => {
     if (downloadPhase !== 'downloading') return;
@@ -229,26 +219,18 @@ function registerUpdaterEvents(): void {
     // 用户主动取消：error 事件不派发 CancellationError，但有的路径会落到这里，
     // 状态已被 cancel IPC 复位，直接忽略
     if (downloadCanceled) return;
-    const wasDownloading = downloadPhase === 'downloading';
-    if (wasDownloading) {
-      resetDownload();
-      notifyRenderer({ phase: 'error', message: errorDetail(error) });
-      showBox({
-        type: 'error',
-        title: 'Typewren',
-        message: '更新下载失败',
-        detail: errorDetail(error),
-        buttons: ['确定']
-      });
-    } else if (!checkSilent) {
-      showBox({
-        type: 'error',
-        title: 'Typewren',
-        message: '检查更新失败',
-        detail: errorDetail(error),
-        buttons: ['确定']
-      });
-    }
+    // 只处理下载期错误；检查期错误由 checkForUpdates 的 catch 按 silent 参数提示
+    // （两处都弹会重复出框）
+    if (downloadPhase !== 'downloading') return;
+    resetDownload();
+    notifyRenderer({ phase: 'error', message: errorDetail(error) });
+    showBox({
+      type: 'error',
+      title: 'Typewren',
+      message: '更新下载失败',
+      detail: errorDetail(error),
+      buttons: ['确定']
+    });
   });
 }
 
@@ -294,13 +276,41 @@ export async function checkForUpdates(silent = false): Promise<void> {
   }
 
   if (silent && Date.now() - (await lastCheckTime()) < AUTO_CHECK_INTERVAL_MS) return;
-
-  checkSilent = silent;
+  if (checkInFlight) return;
+  checkInFlight = true;
   registerUpdaterEvents();
   try {
-    await autoUpdater.checkForUpdates();
+    const result = await autoUpdater.checkForUpdates();
+    void markChecked();
+    if (result?.isUpdateAvailable !== true) {
+      if (!silent) {
+        showBox({
+          type: 'info',
+          title: 'Typewren',
+          message: '当前已是最新版本',
+          detail: `Typewren v${app.getVersion()}`,
+          buttons: ['确定']
+        });
+      }
+      return;
+    }
+    // 兜底：即便状态机判断漏了，已在下载/已下载时也不再弹「发现新版本」
+    if (downloadPhase !== 'idle') return;
+    const win = activeWindow();
+    if (!win) return;
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'info',
+      title: 'Typewren - 发现新版本',
+      message: `发现新版本 v${result.updateInfo.version}`,
+      detail: `当前版本: v${app.getVersion()}\n\n${notesText(result.updateInfo.releaseNotes)}`,
+      buttons: ['下载更新', '稍后提醒'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (response === 0) startDownload(result.updateInfo.version);
   } catch (error) {
-    // 检查本身抛错（网络异常等）：error 事件也会兜底提示；静默模式不打扰
+    // 检查本身抛错（网络异常等）：静默模式不打扰；error 事件对检查期错误不再弹框
     if (!silent) {
       showBox({
         type: 'error',
@@ -310,6 +320,8 @@ export async function checkForUpdates(silent = false): Promise<void> {
         buttons: ['确定']
       });
     }
+  } finally {
+    checkInFlight = false;
   }
 }
 
@@ -319,6 +331,10 @@ export function registerUpdaterIpc(): void {
     if (downloadPhase !== 'downloading') return;
     downloadCanceled = true;
     cancelToken?.cancel();
+    // 取消与完成的竞态：下载可能恰在取消瞬间跑完，状态机挡住了完成提示，
+    // 但 electron-updater 内部仍会随应用退出自动安装——取消成功必须关掉
+    // autoInstallOnAppQuit（下次下载开始时恢复，见 startDownload）
+    autoUpdater.autoInstallOnAppQuit = false;
     resetDownload();
     notifyRenderer({ phase: 'canceled' });
   });

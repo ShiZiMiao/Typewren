@@ -134,16 +134,38 @@ test.describe('偏好设置', () => {
       .toContain('追加文本');
   });
 
-  test('settings.json 持久化内容正确', async () => {
-    const s = readSettingsFile();
-    expect(s.fontSize).toBe(20);
-    expect(s.lineHeight).toBe(2);
-    expect(s.editorWidth).toBe(1400);
-    expect(s.fontFamily).toBe(MS_YH);
-    expect(s.theme).toBe('dark');
-    expect(s.spellcheck).toBe(true);
-    expect(s.autoSave).toBe(true);
-    expect(s.autoSaveInterval).toBe(5);
+  test('settings.json 持久化内容正确（自置设置后断言，不依赖前序用例写入值）', async () => {
+    // 顺序解耦：旧实现硬编码前序用例（排版/主题/拼写/自动保存）改出的值，
+    // 单独重跑或调序即假失败。本用例自行写入完整设置再断言落盘内容；
+    // 这些值同时是「重启后设置保留」的前置状态（它只依赖本用例的落盘结果）
+    const profile = {
+      fontFamily: MS_YH,
+      fontSize: 20,
+      lineHeight: 2,
+      editorWidth: 1400,
+      theme: 'dark',
+      autoSave: true,
+      autoSaveInterval: 5,
+      spellcheck: true,
+      draftInterval: 30,
+      autoPairs: true
+    };
+    await app.window.evaluate((s) => {
+      (window as unknown as { typewren: { setSettings(x: unknown): void } }).typewren.setSettings(s);
+    }, profile);
+    // 落盘有 300ms 防抖（合并逐击键的设置写），轮询到内容一致
+    await expect
+      .poll(
+        () => {
+          try {
+            return readSettingsFile();
+          } catch {
+            return {};
+          }
+        },
+        { timeout: 5000 }
+      )
+      .toMatchObject(profile);
   });
 
   test('重启后设置保留（排版/主题/对话框回显）', async () => {

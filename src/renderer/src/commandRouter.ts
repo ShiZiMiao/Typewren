@@ -21,7 +21,9 @@ import {
   toggleTextMark,
   wrapInListKind
 } from '@/editor/actions';
-import { toggleTheme } from '@/ui/theme';
+import { toggleTheme, syncThemeButton } from '@/ui/theme';
+import { applyZoomAction } from '@/ui/zoom';
+import { promptDialog } from '@/ui/promptDialog';
 import type { WritingModes } from '@/ui/writingModes';
 import type { SpellcheckController } from '@/ui/spellcheck';
 import type { AutoPairsController } from '@/editor/autoPairs';
@@ -32,6 +34,23 @@ import type { SettingsDialog } from '@/ui/settingsDialog';
  * 命令路由：主进程菜单 / 快捷键命令 (cmd 通道) → 编辑器与 UI 操作
  * 每个 case 只做转译与装配，具体操作收口到 editor/actions 与 services。
  * ============================================================ */
+
+/** Promise 失败兜底：编辑器已销毁/IPC 抛错等不再裸奔 unhandled——
+ * 旧实现 `void fileService.save()` 无 .catch，出错既无提示也无日志线索。
+ * 提示面复用 promptDialog（与 actions 的「链接地址无效」同款）。 */
+function reportFailure(label: string, error: unknown): void {
+  console.error(`${label}失败：`, error);
+  void promptDialog({
+    title: `${label}失败`,
+    label: String(error),
+    confirmText: '知道了'
+  });
+}
+
+/** void Promise 统一挂失败提示（成功路径不打扰） */
+function guard(label: string, run: Promise<unknown>): void {
+  void run.catch((error: unknown) => reportFailure(label, error));
+}
 
 export interface CommandRouterDeps {
   editor: Editor;
@@ -56,19 +75,19 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
     switch (name) {
       /* 文件 */
       case 'new-file':
-        void fileService.newFile().then(() => outline.refresh());
+        guard('新建文档', fileService.newFile().then(() => outline.refresh()));
         break;
       case 'open-file':
-        void fileService.openFile().then(() => outline.refresh());
+        guard('打开文档', fileService.openFile().then(() => outline.refresh()));
         break;
       case 'save':
-        void fileService.save();
+        guard('保存', fileService.save());
         break;
       case 'save-as':
-        void fileService.saveAs();
+        guard('另存为', fileService.saveAs());
         break;
       case 'save-and-close':
-        void fileService.saveThenClose();
+        guard('保存', fileService.saveThenClose());
         break;
       case 'discard-close':
         // 关闭保护中选择"不保存"：清理草稿后强制关闭
@@ -81,29 +100,30 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
       }
       case 'file:open-smart':
         if (typeof payload === 'string') {
-          void fileService.openSmart(payload);
+          guard('打开文档', fileService.openSmart(payload));
         }
         break;
       case 'file:preferences':
         deps.settingsDialog.open();
         break;
       case 'export:pdf':
-        void exportDocument(editor, fileService, 'pdf');
+        guard('导出 PDF', exportDocument(editor, fileService, 'pdf'));
         break;
       case 'export:html':
-        void exportDocument(editor, fileService, 'html');
+        guard('导出 HTML', exportDocument(editor, fileService, 'html'));
         break;
       case 'export:docx':
-        void exportDocument(editor, fileService, 'docx');
+        guard('导出 Word', exportDocument(editor, fileService, 'docx'));
         break;
       case 'export:png':
-        void exportDocument(editor, fileService, 'png');
+        guard('导出 PNG', exportDocument(editor, fileService, 'png'));
         break;
       case 'open-file-path':
         if (isFileContentPayload(payload)) {
-          void fileService
-            .loadContentFromPath(payload.path, payload.content)
-            .then(() => outline.refresh());
+          guard(
+            '打开文档',
+            fileService.loadContentFromPath(payload.path, payload.content).then(() => outline.refresh())
+          );
         }
         break;
 
@@ -122,11 +142,11 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
         toggleTextMark(editor, 'inlineCode');
         break;
       case 'format:link':
-        void insertOrUpdateLink(editor);
+        guard('插入链接', insertOrUpdateLink(editor));
         break;
       case 'format:image':
         // 原生图片选择框 → 落盘到文档 assets 后插入（与粘贴同一条落盘链路）
-        void imageService.pickAndInsertLocally();
+        guard('插入图片', imageService.pickAndInsertLocally());
         break;
 
       /* 标题与列表 */
@@ -168,8 +188,9 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
         searchBar.toggle();
         break;
       case 'edit:replace':
-        searchBar.toggle();
-        searchBar.toggleReplace();
+        // 幂等语义"确保搜索栏打开 + 替换行可见"：旧实现 toggle()+toggleReplace()
+        // 组合在替换面板已开时会把整个搜索栏关掉、再把 replace 行显示在隐藏容器里
+        searchBar.openWithReplace();
         break;
 
       /* 视图 */
@@ -181,7 +202,9 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
         deps.toggleSidebar();
         break;
       case 'view:theme': {
-        layout.btnThemeToggle.textContent = toggleTheme() === 'dark' ? '☀ 亮色' : '☾ 暗色';
+        // 与按钮点击同路径：toggleTheme 后经 syncThemeButton 同步文案**与 title**
+        // （旧实现只改 textContent，与 theme.ts 的按钮同步各写一份且 title 不更新）
+        syncThemeButton(layout.btnThemeToggle, toggleTheme());
         break;
       }
       case 'view:background-settings':
@@ -192,6 +215,15 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
         break;
       case 'view:typewriter-mode':
         deps.writingModes.toggleTypewriter();
+        break;
+      case 'view:zoom-in':
+        applyZoomAction('in');
+        break;
+      case 'view:zoom-out':
+        applyZoomAction('out');
+        break;
+      case 'view:zoom-reset':
+        applyZoomAction('reset');
         break;
       case 'edit:spellcheck':
         deps.spellcheck.toggle();

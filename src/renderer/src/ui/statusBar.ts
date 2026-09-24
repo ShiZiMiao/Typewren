@@ -9,9 +9,12 @@ export interface StatusBarRefs {
 /** 状态栏高频输入时的节流等待 */
 const UPDATE_THROTTLE_MS = 80;
 
-/** 统计：中文字符按字计，西文按单词计 */
+/** 统计：中文字符按字计，西文按单词计。
+ * Han 用 \p{Script=Han}（u 标志）覆盖全部汉字区块——旧的手写区间
+ * （U+3400-4DBF / 4E00-9FFF / F900-FAFF）漏掉扩展 B 及以后
+ * （U+20000+，𠀀 之类生僻字/人名用字），这些字此前一个都不计数。 */
 function countWords(text: string): number {
-  const cjk = text.match(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g) ?? [];
+  const cjk = text.match(/\p{Script=Han}/gu) ?? [];
   const latinWords = text.match(/[A-Za-z0-9][A-Za-z0-9'_-]*/g) ?? [];
   return cjk.length + latinWords.length;
 }

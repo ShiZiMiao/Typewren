@@ -7,10 +7,13 @@ import type { FileService } from './fileService';
 
 /* ============================================================
  * 图片粘贴 / 拖拽落盘（渲染层侧）
- * 判断图片来源后委托主进程保存到文档 assets 目录，
- * 生成的路径以相对 Markdown 引用插入编辑器：
+ * 判断图片来源后委托主进程保存到文档 assets 目录，生成的路径以
+ * 相对 Markdown 引用插入编辑器（截图/网络图片无源路径：渲染层读完
+ * 字节转 base64 再保存；URL 图片由主进程下载）：
  *   ![](./assets/image-20260901-103000-1234.png)
- * 截图/网络图片无源路径：渲染层读完字节转 base64 再保存。
+ * 落盘失败一律弹框反馈（主进程 failResult 只回错误不弹框，静默失败
+ * 用户无从知道图没插进去）。插入走 actions.insertMarkdown：源码模式下
+ * 自动改插源码视图（退出源码时被写回覆盖而丢失的历史坑）。
  * ============================================================ */
 
 /** 剪贴板位图可能高达数 MB，分块拼 string 避免栈溢出 */
@@ -28,26 +31,42 @@ function normalizePath(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
-/** 取路径的目录部分（兼容 / 与 \\，渲染层不依赖 node:path） */
+/**
+ * 取路径的目录部分（兼容 / 与 \\，渲染层不依赖 node:path）。
+ * 无分隔符（纯文件名）返回 ''——旧实现返回整个文件名，把它当目录用。
+ * 注意：本函数是通用工具，只因历史位置暂住图片服务（main.ts 跨层引用，
+ * 勿挪走而不留同名转发）。
+ */
 export function dirnamePath(p: string): string {
   const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
-  return idx < 0 ? p : p.slice(0, idx);
+  return idx < 0 ? '' : p.slice(0, idx);
 }
 
 /** fromDir 目录下的相对路径；不在其下时返回原绝对路径（兜底） */
 function relativeTo(fromDir: string, target: string): string {
   const from = normalizePath(fromDir).replace(/\/+$/, '');
   const to = normalizePath(target);
-  return to.startsWith(`${from}/`) ? to.slice(from.length + 1) : to;
+  // Windows 路径大小写不敏感：前缀判定忽略大小写（盘符/目录大小写不一致时
+  // 否则相对化失败，Markdown 里落一个绝对路径），切片仍按原串长度
+  if (to.length > from.length + 1 && to.toLowerCase().startsWith(`${from}/`.toLowerCase())) {
+    return to.slice(from.length + 1);
+  }
+  return to;
 }
 
 /**
- * 图片粘贴 / 拖拽落盘（渲染层侧）
- * 判断图片来源后 → 主进程保存到文档 assets 目录，
- * 生成的路径按文档内习惯以相对 Markdown 插入编辑器：
- *   ![](./assets/image-20260901-100000-1234.png)
- * 截图/网络位图无源文件路径 → 渲染层转 base64 后保存。
+ * Markdown 引用里的路径编码：encodeURI 不转义 ( ) # ? —— 文件名/目录带括号
+ * （非配对）会把 ![x](…a(1).png) 的引用解析打断，带 # ? 在 URL 层面会被当
+ * fragment/query。手动补百分号编码（在 encodeURI 之后做，不重复编码 %）。
+ * 解码端是 editor/imageView.decodeImageRef（resolveImageSrc 不解码），
+ * 两端必须成对演进——只编码不解析会让落盘文件永远 404。
  */
+function encodeMarkdownPath(p: string): string {
+  return encodeURI(p).replace(/[()#?]/g, (ch) => {
+    return `%${ch.charCodeAt(0).toString(16).toUpperCase()}`;
+  });
+}
+
 export class ImageService {
   constructor(
     private readonly api: TypewrenApi,
@@ -67,13 +86,25 @@ export class ImageService {
     const docPath = this.fileService.getFilePath();
     // 未保存文档：正斜杠绝对路径（必须转正斜杠——反斜杠经 encodeURI
     // 变 %5C 后既污染 Markdown 又会被解析成未知协议，正是"粘贴不显示"的老坑）
-    if (!docPath) return encodeURI(normalizePath(savedPath));
+    if (!docPath) return encodeMarkdownPath(normalizePath(savedPath));
     const rel = relativeTo(dirnamePath(docPath), savedPath);
-    return `./${encodeURI(rel)}`;
+    return `./${encodeMarkdownPath(rel)}`;
   }
 
   private insertImage(src: string): void {
     insertMarkdown(this.editor, `![](${src})`);
+  }
+
+  /**
+   * 落盘失败反馈：主进程只回错误串不弹框，静默失败会让用户以为"粘贴没反应"
+   * （图片根本没落盘）。统一用单按钮原生框（与另存为附件复制失败同款）。
+   */
+  private reportFailure(action: string, error: string | undefined): void {
+    void this.api.confirmDialog({
+      message: `${action}失败`,
+      detail: error ?? '未知错误',
+      buttons: ['知道了']
+    });
   }
 
   /* ---------- 入口 ---------- */
@@ -96,7 +127,11 @@ export class ImageService {
   /** 网络图片 URL → 下载本地化 */
   async insertFromUrl(url: string): Promise<void> {
     const result = await this.api.downloadImage({ url, docPath: this.docPath() });
-    if (result.ok && result.savedPath) this.insertImage(this.markdownSrc(result.savedPath));
+    if (result.ok && result.savedPath) {
+      this.insertImage(this.markdownSrc(result.savedPath));
+    } else {
+      this.reportFailure('插入网络图片', result.error);
+    }
   }
 
   /** 菜单「插入图片」：原生文件选择框（多选）→ 逐个按粘贴同款流程落盘并插入 */
@@ -115,7 +150,11 @@ export class ImageService {
       srcPath,
       docPath: this.docPath()
     });
-    if (result.ok && result.savedPath) this.insertImage(this.markdownSrc(result.savedPath));
+    if (result.ok && result.savedPath) {
+      this.insertImage(this.markdownSrc(result.savedPath));
+    } else {
+      this.reportFailure('插入图片', result.error);
+    }
   }
 
   private async insertFromData(file: File): Promise<void> {
@@ -125,7 +164,11 @@ export class ImageService {
       mime: file.type || 'image/png',
       docPath: this.docPath()
     });
-    if (result.ok && result.savedPath) this.insertImage(this.markdownSrc(result.savedPath));
+    if (result.ok && result.savedPath) {
+      this.insertImage(this.markdownSrc(result.savedPath));
+    } else {
+      this.reportFailure('插入图片', result.error);
+    }
   }
 }
 

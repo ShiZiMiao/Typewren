@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { launchApp, closeApp, loadContent, sendCommand } from './helpers';
+import { launchApp, closeApp, loadContent, sendCommand, type AppHandle } from './helpers';
 
 let app: AppHandle;
 
@@ -36,7 +36,7 @@ test.describe('表格显示', () => {
     // AGENTS.md 决策 #10：勿在 PM 设 overflow-x:auto，否则截断表格溢出。
     const overflowX = await app.window
       .locator('.ProseMirror')
-      .evaluate((el) => getComputedStyle(el).overflowX);
+      .evaluate((el: Element) => getComputedStyle(el).overflowX);
     expect(overflowX).toBe('visible');
   });
 
@@ -44,7 +44,7 @@ test.describe('表格显示', () => {
     await loadContent(app, '| 一 | 二 |\n| --- | --- |\n| a | b |');
     const overflowX = await app.window
       .locator('.table-scroll-wrapper')
-      .evaluate((el) => getComputedStyle(el).overflowX);
+      .evaluate((el: Element) => getComputedStyle(el).overflowX);
     expect(['auto', 'scroll']).toContain(overflowX);
   });
 
@@ -96,7 +96,7 @@ test.describe('表格显示', () => {
 
     const hasVerticalScroll = await app.window
       .locator('#editor-container')
-      .evaluate((el) => el.scrollHeight > el.clientHeight);
+      .evaluate((el: HTMLElement) => el.scrollHeight > el.clientHeight);
 
     expect(hasVerticalScroll).toBeTruthy();
   });
@@ -107,7 +107,7 @@ test.describe('表格显示', () => {
 /** 合成点击某单元格（与真实点击同一入口：PM 的 handleClick → 选中进入表格） */
 async function clickCell(row: number, col: number): Promise<void> {
   await app.window.evaluate(
-    ({ r, c }) => {
+    ({ r, c }: { r: number; c: number }) => {
       const cell = document
         .querySelectorAll('.table-scroll-wrapper table tbody tr')
         [r]?.querySelectorAll('td, th')[c] as HTMLElement | undefined;
@@ -126,10 +126,10 @@ async function clickCell(row: number, col: number): Promise<void> {
 
 /** 点击表格工具条的按钮（title 定位） */
 async function clickToolButton(title: string): Promise<void> {
-  await app.window.evaluate((t) => {
-    const btn = [...document.querySelectorAll('#typewren-table-tools button')].find(
-      (b) => b.title === t
-    ) as HTMLButtonElement | undefined;
+  await app.window.evaluate((t: string) => {
+    const btn = [
+      ...document.querySelectorAll<HTMLButtonElement>('#typewren-table-tools button')
+    ].find((b) => b.title === t);
     if (btn) btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   }, title);
   await app.window.waitForTimeout(300);

@@ -8,6 +8,7 @@
  * ============================================================ */
 
 import type { ThemePreference } from '../../../shared/settings';
+import { localStore } from '../util/storage';
 
 const STORAGE_KEY = 'typewren.theme';
 
@@ -21,7 +22,7 @@ function systemPrefersDark(): boolean {
 }
 
 function readStoredPreference(): ThemePreference | null {
-  const value = localStorage.getItem(STORAGE_KEY);
+  const value = localStore.get(STORAGE_KEY);
   return value === 'light' || value === 'dark' || value === 'system' ? value : null;
 }
 
@@ -55,7 +56,7 @@ export function setThemePreferenceSink(sink: ((preference: ThemePreference) => v
 export function applyPreference(preference: ThemePreference): ThemeName {
   const resolved = resolve(preference);
   // 镜像缓存：首帧快路径 + 旧版 UI 测试兼容（typewren.theme 断言）
-  localStorage.setItem(STORAGE_KEY, preference);
+  localStore.set(STORAGE_KEY, preference);
 
   if (preference !== lastPreference) {
     lastPreference = preference;
@@ -85,18 +86,20 @@ export function toggleTheme(): ThemeName {
   return applyPreference(next);
 }
 
+/** 同步主题按钮文案与 title 提示（状态栏按钮 / view:theme 命令共用同一收口，
+ * 避免命令路径只改 textContent 不更新 title 的漂移） */
+export function syncThemeButton(button: HTMLButtonElement, theme: ThemeName): void {
+  button.textContent = theme === 'dark' ? '☀ 亮色' : '☾ 暗色';
+  button.title = theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题';
+}
+
 export function initThemeToggle(
   button: HTMLButtonElement,
   fallbackPreference: ThemePreference
 ): void {
-  const syncButtonLabel = (theme: ThemeName): void => {
-    button.textContent = theme === 'dark' ? '☀ 亮色' : '☾ 暗色';
-    button.title = theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题';
-  };
-
   // 镜像（localStorage，含旧版遗留值）优先；settings.json 为权威
   const preference = readStoredPreference() ?? fallbackPreference;
-  syncButtonLabel(applyPreference(preference));
+  syncThemeButton(button, applyPreference(preference));
 
   // 以主进程 nativeTheme 为唯一时钟：
   // 跟随系统偏好变化；显式指定 light/dark 时 themeSource 覆盖系统值，不会误触发
@@ -108,12 +111,12 @@ export function initThemeToggle(
     }
     if (currentTheme() !== resolved) {
       applyToDom(resolved);
-      syncButtonLabel(resolved);
+      syncThemeButton(button, resolved);
     }
   });
   nativeClockReady = true;
 
   button.addEventListener('click', () => {
-    syncButtonLabel(toggleTheme());
+    syncThemeButton(button, toggleTheme());
   });
 }

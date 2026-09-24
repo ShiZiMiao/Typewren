@@ -118,6 +118,12 @@ class MermaidBlockView implements NodeView {
   dom: HTMLElement;
   renderEl: HTMLElement;
   editorEl: HTMLTextAreaElement;
+  /** 渲染序号：mermaid 渲染异步无序，旧请求后到会覆盖新图——序号不匹配即丢弃 */
+  private renderToken = 0;
+  /** destroy 后禁止任何 DOM 写入（挂起的异步渲染回来时视图已不在） */
+  private destroyed = false;
+  /** 挂起的聚焦定时器（destroy 时清理） */
+  private focusTimer: number | undefined;
 
   constructor(
     private node: ProseNode,
@@ -154,14 +160,20 @@ class MermaidBlockView implements NodeView {
   }
 
   private async render(value: string): Promise<void> {
+    // 每次渲染领一个序号：await 期间又有新渲染/已销毁时，本结果作废
+    const token = ++this.renderToken;
+    const stale = (): boolean => this.destroyed || token !== this.renderToken;
     const code = value.trim();
     if (!code) {
       this.renderEl.innerHTML = '<em class="typewren-math-error">空图表，选中它编辑源码</em>';
       return;
     }
     try {
-      this.renderEl.innerHTML = await renderMermaidSvg(code);
+      const svg = await renderMermaidSvg(code);
+      if (stale()) return;
+      this.renderEl.innerHTML = svg;
     } catch (error) {
+      if (stale()) return;
       this.renderEl.innerHTML = `<div class="typewren-math-error">${escapeHtml(String(error))}</div>`;
     }
   }
@@ -186,10 +198,13 @@ class MermaidBlockView implements NodeView {
     this.dom.classList.add('math-editing');
     this.editorEl.value = this.node.attrs.value as string;
     this.autoResize();
-    requestAnimationFrame(() => {
+    // setTimeout 而非 rAF：无头/后台窗口 rAF 可能被节流，焦点必须随即生效
+    window.clearTimeout(this.focusTimer);
+    this.focusTimer = window.setTimeout(() => {
+      this.focusTimer = undefined;
       this.editorEl.focus();
       this.editorEl.setSelectionRange(this.editorEl.value.length, this.editorEl.value.length);
-    });
+    }, 0);
   }
 
   deselectNode(): void {
@@ -216,6 +231,9 @@ class MermaidBlockView implements NodeView {
   }
 
   destroy(): void {
+    this.destroyed = true;
+    this.renderToken += 1;
+    window.clearTimeout(this.focusTimer);
     this.dom.remove();
   }
 }
@@ -233,24 +251,24 @@ export const mermaidInputConvert = $prose(() => {
     view(view: EditorView) {
       const convert = (): void => {
         const { state } = view;
-        // 手动遍历顶层节点找 mermaid 代码块（TS 无法跟进 descendants 回调内的赋值）
         const doc = state.doc;
-        const offsets: number[] = [];
-        doc.forEach((_n, offset) => {
-          offsets.push(offset);
-        });
-        let found: { from: number; to: number } | null = null;
-        for (let i = 0; i < doc.childCount; i++) {
-          const node = doc.child(i);
+        // descendants 全树扫描：引用块/列表/表格单元格里的 ```mermaid 同样转换
+        // （旧版只扫顶层 child(i)，嵌套的 mermaid 代码块永不转换）。
+        // 用数组收集命中——found 变量在回调里赋值时 TS 的收窄跟不上
+        const hits: { from: number; to: number }[] = [];
+        doc.descendants((node, pos) => {
+          if (hits.length > 0) return false;
           if (
             node.type.name === 'code_block' &&
             (node.attrs as { language?: string | null }).language === 'mermaid'
           ) {
-            found = { from: offsets[i], to: offsets[i] + node.nodeSize };
-            break;
+            hits.push({ from: pos, to: pos + node.nodeSize });
+            return false;
           }
-        }
-        if (found === null) return;
+          return true;
+        });
+        const found = hits[0];
+        if (!found) return;
 
         const code = doc.textBetween(found.from + 1, found.to - 1, '\n');
         // $prose 插件内拿不到 ctx：直接经 schema.nodes 取节点类型

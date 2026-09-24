@@ -10,7 +10,7 @@ import { remarkStringifyOptionsCtx, parserCtx } from '@milkdown/kit/core';
 import { remarkGFMPlugin } from '@milkdown/kit/preset/gfm';
 import {
   applyStrikethroughFixes,
-  escapeTracking
+  withEscapeTracking
 } from '../src/renderer/src/editor/strikethroughFix.ts';
 
 const NL = String.fromCharCode(10);
@@ -65,30 +65,31 @@ const mockCtx = {
 applyStrikethroughFixes(mockCtx);
 
 // ---- 复刻 actions.getMarkdown：放宽 → 回读校验 → 不等则严格兜底 ----
+// 转义跟踪上下文经 withEscapeTracking 随调用成对创建（与 actions.getMarkdown 同款）
 function getMarkdownShim(md) {
-  const originTree = toTree(md);
-  const stringify = (opts) =>
-    unified()
-      .use(remarkParse)
-      .use(remarkGfm, captured.gfm)
-      .use(remarkStringify, opts)
-      .processSync(md)
-      .toString();
+  return withEscapeTracking((esc) => {
+    const originTree = toTree(md);
+    const stringify = (opts) =>
+      unified()
+        .use(remarkParse)
+        .use(remarkGfm, captured.gfm)
+        .use(remarkStringify, opts)
+        .processSync(md)
+        .toString();
 
-  escapeTracking.strict = false;
-  escapeTracking.relaxed = false;
-  let out = stringify(captured.stringify);
-  if (escapeTracking.relaxed) {
-    escapeTracking.strict = true;
-    try {
-      if (textContentOf(toTree(out)) !== textContentOf(originTree)) {
-        out = stringify(captured.stringify);
+    let out = stringify(captured.stringify);
+    if (esc.relaxed) {
+      esc.strict = true;
+      try {
+        if (textContentOf(toTree(out)) !== textContentOf(originTree)) {
+          out = stringify(captured.stringify);
+        }
+      } finally {
+        esc.strict = false;
       }
-    } finally {
-      escapeTracking.strict = false;
     }
-  }
-  return out.replace(/\n$/, '');
+    return out.replace(/\n$/, '');
+  });
 }
 
 const cases = [

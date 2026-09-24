@@ -1,13 +1,16 @@
-import katex from 'katex';
 import hljs from 'highlight.js/lib/common';
 import { parserCtx, type Editor } from '@milkdown/kit/core';
 import { DOMSerializer, type Node as ProseNode } from '@milkdown/kit/prose/model';
 
 import type { FileService } from '@/services/fileService';
+import { dirnamePath } from '@/services/imagePasteService';
 import { currentTheme } from '@/ui/theme';
 import { escapeHtml } from '@/util/escape';
 import { isSafeLinkHref } from '@/util/link';
+import { resolveImageSrc } from '../../../shared/imageUrl';
 import { renderMermaidSvg } from './mermaid';
+import { renderMath } from './math';
+import { decodeImageRef } from './imageView';
 import { fillExportToc } from './toc';
 import { buildDocxDoc } from './docxExport';
 
@@ -23,23 +26,12 @@ import katexCss from 'katex/dist/katex.min.css?raw';
  * 各节点 toDOM 序列化为 HTML——骨架与编辑器所见完全一致；
  * 公式（KaTeX）与代码高亮（highlight.js）以两段轻量后处理补齐，
  * CSS 直接内联编辑器同款 variables.css + editor.css。
+ * 本地图片 src 导出前统一改写为 typewren-img://（resolveExportImages）：
+ * 导出 HTML 的基址是临时目录（PDF/PNG 由主进程隐藏窗口 loadFile 加载），
+ * 文档相对引用 ./assets/… 必然 404——与编辑器显示同一套 resolveImageSrc 解析。
  * ============================================================ */
 
 export type ExportKind = 'pdf' | 'html' | 'docx' | 'png';
-
-/** 渲染 KaTeX；出错时输出错误提示而非中断导出 */
-function renderMath(latex: string, displayMode: boolean): string {
-  try {
-    return katex.renderToString(latex, {
-      displayMode,
-      throwOnError: false,
-      strict: false,
-      output: 'html'
-    });
-  } catch (error) {
-    return `<span class="typewren-math-error">${escapeHtml(String(error))}</span>`;
-  }
-}
 
 /** 行内公式 / 块级公式：把序列化出的占位节点换成 KaTeX 渲染结果 */
 function renderFragmentMath(root: HTMLElement): void {
@@ -121,11 +113,29 @@ function sanitizeLinks(root: HTMLElement): void {
   });
 }
 
+/**
+ * 本地图片 src 改写为可加载 URL（与编辑器 imageView 同一 resolveImageSrc 口径）。
+ * 导出 HTML 落在临时目录再被隐藏窗口 loadFile（PDF/PNG），文档里的相对引用
+ * ./assets/… 以临时目录为基址必然 404（图片其实就在文档旁边）。
+ * - 本地引用（相对/绝对路径）→ typewren-img://local/…（协议全局注册，隐藏窗可用）；
+ * - 非本地 URL（http/https/data 等已带 scheme）resolveImageSrc 原样返回，不动；
+ * - 用 setAttribute 写回原始属性值：走 img.src 属性赋值会被浏览器按页面基址
+ *   再解析一次（/x.png → 临时目录绝对路径），必须保持字面值。
+ */
+function resolveExportImages(root: HTMLElement, docDir: string | null): void {
+  root.querySelectorAll<HTMLImageElement>('img[src]').forEach((img) => {
+    const raw = img.getAttribute('src') ?? '';
+    // 先撤销引用侧百分号编码（与编辑器 imageView 同口径），再解析
+    img.setAttribute('src', resolveImageSrc(decodeImageRef(raw), docDir));
+  });
+}
+
 /** 把 Markdown 走编辑器 parser 渲染为导出用的 HTML 文档字符串 */
 export async function buildExportHtml(
   editor: Editor,
   markdown: string,
-  title: string
+  title: string,
+  docDir: string | null
 ): Promise<string> {
   const doc: ProseNode = editor.action((ctx) => ctx.get(parserCtx)(markdown));
 
@@ -136,6 +146,8 @@ export async function buildExportHtml(
   fillExportToc(content, doc);
   highlightCodeBlocks(content);
   wrapTables(content);
+  // 图片解析与链接消毒互不影响（后者只动 a[href]），顺序随意但同批收口
+  resolveExportImages(content, docDir);
   sanitizeLinks(content);
 
   return `<!DOCTYPE html>
@@ -187,10 +199,21 @@ export async function exportDocument(
     return;
   }
 
-  const html = await buildExportHtml(editor, fileService.currentMarkdown, base);
+  const html = await buildExportHtml(
+    editor,
+    fileService.currentMarkdown,
+    base,
+    docDirOf(fileService)
+  );
   await window.typewren.exportDocument({
     kind,
     html,
     suggestedName
   });
+}
+
+/** 文档目录（图片相对引用的解析基准）；未保存文档无从解析 → null 原样透传 */
+function docDirOf(fileService: FileService): string | null {
+  const path = fileService.getFilePath();
+  return path ? dirnamePath(path) : null;
 }
