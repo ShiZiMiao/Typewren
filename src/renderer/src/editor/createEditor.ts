@@ -7,7 +7,7 @@ import {
 } from '@milkdown/kit/core';
 import { commonmark } from '@milkdown/kit/preset/commonmark';
 import { gfm, tableSchema } from '@milkdown/kit/preset/gfm';
-import { Plugin } from '@milkdown/kit/prose/state';
+import { NodeSelection, Plugin } from '@milkdown/kit/prose/state';
 import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import { history } from '@milkdown/kit/plugin/history';
@@ -20,6 +20,10 @@ import { highlight, configureCodeHighlight } from './highlight';
 import { applyStrikethroughFixes } from './strikethroughFix';
 import { tabKeyPlugin } from './tabKey';
 import { codeBlockLanguageView } from './codeBlockView';
+import { frontmatterSchema, frontmatterView, remarkFrontmatterPlugin } from './frontmatter';
+import { rawHtmlView } from './rawHtml';
+import { detailsSchema, detailsStringifyPlugin, detailsView, remarkDetailsPlugin } from './details';
+import { interactiveQuizRemarkPlugin, interactiveQuizSchema, interactiveQuizStringifyPlugin, interactiveQuizView } from './interactiveQuiz';
 import {
   blockMathEmptyInputRule,
   blockMathFullInputRule,
@@ -176,6 +180,31 @@ export async function createEditor(options: CreateEditorOptions): Promise<Editor
         handlePaste: (_view, event) => {
           if (options.onPaste) return options.onPaste(event);
           return false;
+        },
+        handleKeyDown: (view, event) => {
+          const sel = view.state.selection;
+          if (sel instanceof NodeSelection && sel.node.type.name === 'interactive_quiz') {
+            const key = event.key;
+            // 打印字符 / IME（Process/Unidentified）在 quiz 节点被选中时拦截：
+            // 输入会触发 PM "输入替换节点"（中文经 composition 连 handleTextInput
+            // 都绕开直接删卡）；Backspace/Delete/箭头/Enter 放行（可离开/删除）
+            if (key === 'Process' || key === 'Unidentified') return true;
+            if (key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+              return true;
+            }
+          }
+          return false;
+        },
+        // 答题卡片被 NodeSelection 选中时（如 Ctrl+End 落在卡片、卡片后无文本
+        // 块时 PM 会选中该 atom），打印字符输入会触发 PM "输入替换节点"把整卡
+        // 删掉——吃掉输入（方向键/Enter 仍可离开该选择，见 quiz.ts）
+        handleTextInput: (view, _from, _to, text) => {
+          if (text.length === 0) return false;
+          const sel = view.state.selection;
+          if (sel instanceof NodeSelection && sel.node.type.name === 'interactive_quiz') {
+            return true;
+          }
+          return false;
         }
       }));
 
@@ -190,6 +219,25 @@ export async function createEditor(options: CreateEditorOptions): Promise<Editor
       });
     })
     .use(commonmark)
+    // Raw HTML 块：普通标签净化后真渲染、script/style 按浏览器行为隐藏
+    // （见 rawHtml.ts）；<details> 折叠块由 details.ts 容器节点承接
+    .use(rawHtmlView)
+    // YAML Front Matter：文档开头 --- 元信息块解析为 Typora 式卡片（见 frontmatter.ts）
+    .use(remarkFrontmatterPlugin)
+    .use(frontmatterSchema)
+    .use(frontmatterView)
+    // <details>/<summary> 折叠块：mdast 合并 + 容器节点（summary 收起/展开，
+    // 内部 markdown 真正可编辑，见 details.ts）
+    .use(remarkDetailsPlugin)
+    .use(detailsStringifyPlugin)
+    .use(detailsSchema)
+    .use(detailsView)
+    // <InteractiveQuiz …/> 答题卡片：安全解析 script 里的 quizData 渲染
+    // （VitePress 组件形态，序列化还原原始标签，见 quiz.ts）
+    .use(interactiveQuizRemarkPlugin)
+    .use(interactiveQuizStringifyPlugin)
+    .use(interactiveQuizSchema)
+    .use(interactiveQuizView)
     // 代码块语言角标：可点击修改语言 / 空语言自动识别（pre>code 结构不变，
     // prosemirror-highlight 的 inline decorations 不受影响）
     .use(codeBlockLanguageView)

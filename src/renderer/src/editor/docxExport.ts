@@ -24,6 +24,8 @@ export interface DocxText {
   strike?: boolean;
   code?: boolean;
   href?: string;
+  /** 硬换行 run：主进程输出真 <w:br/>（text 恒为空串） */
+  break?: boolean;
 }
 
 export interface DocxParagraph {
@@ -101,9 +103,11 @@ function extractRuns(node: ProseNode): DocxText[] {
       const alt = String(child.attrs.alt ?? '');
       const src = String(child.attrs.src ?? '');
       runs.push({ text: `![${alt}](${src})` });
-    } else if (child.type.name === 'hard_break') {
-      // 硬换行：独立 run 承载换行符，至少把前后文本隔开（不粘连）
-      runs.push({ text: '\n' });
+    } else if (child.type.name === 'hardbreak') {
+      // 硬换行：break run，主进程 runOf 输出真 <w:br/>。
+      // 节点名是 hardbreak 不是 hard_break（preset-commonmark 的 schema 名）——
+      // 曾拼错让整条分支是死代码，硬换行前后文本在 Word 里直接粘连
+      runs.push({ text: '', break: true });
     }
     return true;
   });
@@ -146,6 +150,41 @@ function extractCellRuns(cell: ProseNode): DocxText[] {
     if (p.isTextblock) runs.push(...extractRuns(p));
   });
   return runs;
+}
+
+const QUIZ_ANSWER_LABELS = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+/** 答题卡片数据 → 文本块（Q 题面加粗 + 选项列表；外部数据的畸形条目降级跳过） */
+function pushQuizBlocks(blocks: DocxBlock[], dataJson: string): void {
+  let raw: unknown[] = [];
+  try {
+    const parsed = JSON.parse(dataJson);
+    if (Array.isArray(parsed)) raw = parsed;
+  } catch {
+    raw = [];
+  }
+  raw.forEach((entry, qi) => {
+    if (entry === null || typeof entry !== 'object') return;
+    const q = entry as { question?: unknown; options?: unknown };
+    blocks.push({
+      type: 'paragraph',
+      runs: [{ text: `Q${qi + 1}. ${String(q.question ?? '')}`, bold: true }],
+      level: 0
+    });
+    const options = Array.isArray(q.options) ? q.options : [];
+    options.forEach((option, oi) => {
+      const o = (
+        option !== null && typeof option === 'object' ? option : {}
+      ) as { label?: unknown; text?: unknown };
+      const label = String(o.label ?? QUIZ_ANSWER_LABELS[oi] ?? '?');
+      blocks.push({
+        type: 'paragraph',
+        runs: [{ text: `${label}. ${String(o.text ?? '')}` }],
+        level: 1,
+        bullet: 'bullet'
+      });
+    });
+  });
 }
 
 function extractBlocks(doc: ProseNode): DocxBlock[] {
@@ -233,6 +272,24 @@ function extractBlocks(doc: ProseNode): DocxBlock[] {
 
     if (name === 'hr') {
       blocks.push({ type: 'rule' });
+      return false;
+    }
+
+    // <details> 折叠块（0.8.0）：summary 是属性不是内容，直接下探会整条丢——
+    // 先落 summary 行（加粗），内部列表/段落继续下探导出
+    if (name === 'details') {
+      const summary = String((node.attrs as { summary?: unknown }).summary ?? '');
+      if (summary.trim().length > 0) {
+        blocks.push({ type: 'paragraph', runs: [{ text: summary, bold: true }], level: 0 });
+      }
+      return true;
+    }
+
+    // <InteractiveQuiz/> 答题卡片（0.8.0）：原子节点无子内容，直接下探整卡丢——
+    // 按 attrs.data 的题目/选项出静态文本（与导出 HTML 的静态镜像同口径；
+    // 解析说明是交互态内容，不进导出）
+    if (name === 'interactive_quiz') {
+      pushQuizBlocks(blocks, String((node.attrs as { data?: unknown }).data ?? ''));
       return false;
     }
 

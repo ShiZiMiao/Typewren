@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol } from 'electron';
 import { constants as fsConstants, promises as fsp } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
 import { fromLocalImageUrl, IMAGE_URL_SCHEME } from '../shared/imageUrl';
 import type {
@@ -210,6 +210,29 @@ const IMAGE_MIME: Record<string, string> = {
 };
 
 /**
+ * `%25` 文件名解码歧义消歧（纯函数，供单测）：
+ * 引用侧只单次编码（`./assets/50%25.png`）时 URI 语义解码成 `50%.png`，
+ * 而盘上文件名是字面 `50%25.png`——按解码后名字找不到，图片 404。
+ * 在「按解码名读不到」的前提下，扫描同目录找 URI 解码后与目标基名相同的
+ * 唯一图片文件顶上；无命中/多命中返回 null 维持 404（标准双编码引用
+ * `50%2525.png` 直接命中字面文件，不进本兜底，语义优先级正确）。
+ */
+export function disambiguatePercentName(absolute: string, entries: string[]): string | null {
+  const dir = dirname(absolute);
+  const wanted = basename(absolute);
+  if (!wanted.includes('%')) return null;
+  const matches = entries.filter((name) => {
+    if (!isImagePath(join(dir, name))) return false;
+    try {
+      return decodeURIComponent(name) === wanted;
+    } catch {
+      return false;
+    }
+  });
+  return matches.length === 1 ? join(dir, matches[0]) : null;
+}
+
+/**
  * 编辑器内图片加载协议：
  * 渲染层把本地图片引用（相对 ./assets/… 或绝对路径）解析为
  * `typewren-img://local/<encodeURIComponent(绝对路径)>` 后由浏览器发起加载，
@@ -217,6 +240,16 @@ const IMAGE_MIME: Record<string, string> = {
  * 相对 src 永远解不到文档目录——协议是"按文档目录解析"的唯一落点。
  * 校验口径与落盘一致：绝对路径 + 受支持图片扩展名（防任意文件被读出）。
  */
+/** 读盘并按扩展名回 Content-Type 的图片响应 */
+async function respondImageFile(path: string): Promise<Response> {
+  const data = await fsp.readFile(path);
+  const dot = path.lastIndexOf('.');
+  const ext = dot >= 0 ? path.slice(dot).toLowerCase() : '';
+  return new Response(new Uint8Array(data), {
+    headers: { 'content-type': IMAGE_MIME[ext] ?? 'application/octet-stream' }
+  });
+}
+
 export function registerImageProtocol(): void {
   protocol.handle(IMAGE_URL_SCHEME, async (request) => {
     const filePath = fromLocalImageUrl(request.url);
@@ -228,14 +261,16 @@ export function registerImageProtocol(): void {
       return new Response('Forbidden', { status: 403 });
     }
     try {
-      const data = await fsp.readFile(absolute);
-      const dot = absolute.lastIndexOf('.');
-      const ext = dot >= 0 ? absolute.slice(dot).toLowerCase() : '';
-      return new Response(new Uint8Array(data), {
-        headers: { 'content-type': IMAGE_MIME[ext] ?? 'application/octet-stream' }
-      });
+      return await respondImageFile(absolute);
     } catch {
-      return new Response('Not Found', { status: 404 });
+      // %25 解码歧义兜底（见 disambiguatePercentName）；仍受 isImagePath 口径约束
+      try {
+        const fallback = disambiguatePercentName(absolute, await fsp.readdir(dirname(absolute)));
+        if (!fallback || !isImagePath(fallback)) return new Response('Not Found', { status: 404 });
+        return await respondImageFile(fallback);
+      } catch {
+        return new Response('Not Found', { status: 404 });
+      }
     }
   });
 }

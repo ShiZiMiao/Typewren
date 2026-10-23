@@ -6,8 +6,8 @@ import type { OutlineController } from '@/ui/outlinePanel';
 import type { SearchBar } from '@/ui/searchBar';
 import type { SourceModeController } from '@/ui/sourceMode';
 import type { FileService } from '@/services/fileService';
-import type { ImageService } from '@/services/imagePasteService';
-import { exportDocument } from '@/editor/exportDocument';
+import { dirnamePath, type ImageService } from '@/services/imagePasteService';
+import { exportDocument, type ExportDocSource } from '@/editor/exportDocument';
 import {
   insertHr,
   insertMathBlock,
@@ -21,7 +21,7 @@ import {
   toggleTextMark,
   wrapInListKind
 } from '@/editor/actions';
-import { toggleTheme, syncThemeButton } from '@/ui/theme';
+import { currentTheme, toggleTheme, syncThemeButton } from '@/ui/theme';
 import { applyZoomAction } from '@/ui/zoom';
 import { promptDialog } from '@/ui/promptDialog';
 import type { WritingModes } from '@/ui/writingModes';
@@ -71,14 +71,31 @@ export interface CommandRouterDeps {
 export function registerCommandRouter(deps: CommandRouterDeps): void {
   const { editor, fileService, imageService, sourceMode, outline, searchBar, layout } = deps;
 
+  /** 导出源装配（editor 层只收纯数据，见 editor/exportDocument 的 ExportDocSource） */
+  const exportSource = (): ExportDocSource => {
+    const path = fileService.getFilePath();
+    return {
+      markdown: fileService.currentMarkdown,
+      fileName: fileService.fileName,
+      docDir: path ? dirnamePath(path) : null,
+      theme: currentTheme()
+    };
+  };
+
   window.typewren.onCommand((name, payload) => {
     switch (name) {
       /* 文件 */
       case 'new-file':
-        guard('新建文档', fileService.newFile().then(() => outline.refresh()));
+        guard(
+          '新建文档',
+          fileService.newFile().then(() => outline.refresh())
+        );
         break;
       case 'open-file':
-        guard('打开文档', fileService.openFile().then(() => outline.refresh()));
+        guard(
+          '打开文档',
+          fileService.openFile().then(() => outline.refresh())
+        );
         break;
       case 'save':
         guard('保存', fileService.save());
@@ -107,22 +124,24 @@ export function registerCommandRouter(deps: CommandRouterDeps): void {
         deps.settingsDialog.open();
         break;
       case 'export:pdf':
-        guard('导出 PDF', exportDocument(editor, fileService, 'pdf'));
+        guard('导出 PDF', exportDocument(editor, exportSource(), 'pdf'));
         break;
       case 'export:html':
-        guard('导出 HTML', exportDocument(editor, fileService, 'html'));
+        guard('导出 HTML', exportDocument(editor, exportSource(), 'html'));
         break;
       case 'export:docx':
-        guard('导出 Word', exportDocument(editor, fileService, 'docx'));
+        guard('导出 Word', exportDocument(editor, exportSource(), 'docx'));
         break;
       case 'export:png':
-        guard('导出 PNG', exportDocument(editor, fileService, 'png'));
+        guard('导出 PNG', exportDocument(editor, exportSource(), 'png'));
         break;
       case 'open-file-path':
         if (isFileContentPayload(payload)) {
           guard(
             '打开文档',
-            fileService.loadContentFromPath(payload.path, payload.content).then(() => outline.refresh())
+            fileService
+              .loadContentFromPath(payload.path, payload.content)
+              .then(() => outline.refresh())
           );
         }
         break;

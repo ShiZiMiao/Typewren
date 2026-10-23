@@ -27,7 +27,7 @@ import {
 import { planStartupWindows } from '../src/main/startup';
 import { normalizePopupPosition } from '../src/main/menu';
 import { isTestMode, suppressesUi } from '../src/main/runMode';
-import { extFromUrlPath, isBlockedFetchHost } from '../src/main/images';
+import { disambiguatePercentName, extFromUrlPath, isBlockedFetchHost } from '../src/main/images';
 import { TITLEBAR_PALETTE } from '../src/shared/titlebar';
 import {
   fromLocalImageUrl,
@@ -37,6 +37,7 @@ import {
 } from '../src/shared/imageUrl';
 import { absolutePathOrEmpty } from '../src/shared/pathKey';
 import { DEFAULT_SETTINGS, sanitizeSettings } from '../src/shared/settings';
+import { parseQuizData } from '../src/renderer/src/editor/quizDataParser';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -127,17 +128,28 @@ test.describe('shared/ipc 纯函数', () => {
     expect(isConfirmDialogPayload({ message: 'm', buttons: ['a', 'b'] })).toBe(true);
     expect(isConfirmDialogPayload({ message: 'm', buttons: ['a'], cancelId: 0 })).toBe(true);
     expect(
-      isConfirmDialogPayload({ message: 'm', detail: 'd', buttons: ['1', '2', '3', '4'], cancelId: 3 })
+      isConfirmDialogPayload({
+        message: 'm',
+        detail: 'd',
+        buttons: ['1', '2', '3', '4'],
+        cancelId: 3
+      })
     ).toBe(true);
     // 原生确认框按钮数上限 4
-    expect(isConfirmDialogPayload({ message: 'm', buttons: ['1', '2', '3', '4', '5'] })).toBe(false);
+    expect(isConfirmDialogPayload({ message: 'm', buttons: ['1', '2', '3', '4', '5'] })).toBe(
+      false
+    );
     expect(isConfirmDialogPayload({ message: 'm', buttons: [] })).toBe(false);
     expect(isConfirmDialogPayload({ message: 'm', buttons: [1] })).toBe(false);
     // cancelId 必须落在按钮下标范围内（越界会让 showMessageBox 抛错/静默错位）
     expect(isConfirmDialogPayload({ message: 'm', buttons: ['a', 'b'], cancelId: 2 })).toBe(false);
     expect(isConfirmDialogPayload({ message: 'm', buttons: ['a', 'b'], cancelId: -1 })).toBe(false);
-    expect(isConfirmDialogPayload({ message: 'm', buttons: ['a', 'b'], cancelId: 1.5 })).toBe(false);
-    expect(isConfirmDialogPayload({ message: 'm', buttons: ['a', 'b'], cancelId: 'x' })).toBe(false);
+    expect(isConfirmDialogPayload({ message: 'm', buttons: ['a', 'b'], cancelId: 1.5 })).toBe(
+      false
+    );
+    expect(isConfirmDialogPayload({ message: 'm', buttons: ['a', 'b'], cancelId: 'x' })).toBe(
+      false
+    );
     expect(isConfirmDialogPayload({ message: 'm', buttons: ['a', 'b'], detail: 1 })).toBe(false);
   });
 
@@ -575,6 +587,27 @@ test.describe('main/images 扩展名兜底链与 SSRF 主机判定', () => {
     expect(isBlockedFetchHost('11.0.0.1')).toBe(false);
     expect(isBlockedFetchHost('193.0.0.1')).toBe(false);
   });
+
+  test('disambiguatePercentName：%25 解码歧义唯一命中才消歧', () => {
+    // 引用 ./assets/50%25.png 解码成 50%.png、盘上是字面 50%25.png → 唯一命中顶上
+    // （期望值用 join 构造：Windows 的 path.join 产出反斜杠）
+    const dir = join('D:', 'doc', 'assets');
+    const wanted = join(dir, '50%.png');
+    expect(disambiguatePercentName(wanted, ['50%25.png', 'other.png'])).toBe(
+      join(dir, '50%25.png')
+    );
+    // 无 % 的目标不进兜底（无歧义可言）
+    expect(disambiguatePercentName(join(dir, 'plain.png'), ['50%25.png'])).toBeNull();
+    // 无命中 / 多命中维持 404，不猜（%2A 与 %2a 两名解码同形 → 多命中）
+    expect(disambiguatePercentName(wanted, ['other.png'])).toBeNull();
+    expect(
+      disambiguatePercentName(join(dir, '50*.png'), ['50%2A.png', '50%2a.png'])
+    ).toBeNull();
+    // 非图片扩展名不顶上（与落盘/读盘同一安全口径）
+    expect(disambiguatePercentName(wanted, ['50%25.txt'])).toBeNull();
+    // 解码后名字不同的（标准双编码 50%2525.png → 50%25.png）不误顶
+    expect(disambiguatePercentName(wanted, ['50%2525.png'])).toBeNull();
+  });
 });
 
 test.describe('打包文件关联与可打开扩展名同步', () => {
@@ -589,5 +622,89 @@ test.describe('打包文件关联与可打开扩展名同步', () => {
 
   test('OPENABLE_EXTENSIONS = MARKDOWN_EXTENSIONS + .txt（file:write 等收口口径）', () => {
     expect(new Set(OPENABLE_EXTENSIONS)).toEqual(new Set([...MARKDOWN_EXTENSIONS, '.txt']));
+  });
+});
+
+test.describe('quizData 安全字面量解析', () => {
+  test('标准结构（含模板字符串与 Unicode 转义）', () => {
+    const script = `<script setup>
+const quizData = [
+  {
+    question: '梯度消失问题的根本原因是什么？',
+    type: 'single',
+    options: [
+      { label: 'A', text: '学习率设置太小' },
+      { label: 'B', text: '深层网络' }
+    ],
+    correct: [1],
+    explanation: \`
+      <strong>正确答案： B</strong><br><br>
+      <ul><li>当标准差变小时梯度也变小</li></ul>
+    \`
+  }
+]
+</script>`;
+    const data = parseQuizData(script);
+    expect(data).not.toBeNull();
+    expect(data?.[0]?.question).toBe('梯度消失问题的根本原因是什么？');
+    expect(data?.[0]?.correct).toEqual([1]);
+    expect(String(data?.[0]?.explanation)).toContain('<strong>正确答案： B</strong>');
+  });
+
+  test('变量名变体 questions 与 Unicode 转义字符串', () => {
+    const data = parseQuizData(
+      `<script setup>\nconst questions = [{ question: '\\u4e2d\\u6587', options: [{ label: 'A', text: 'x' }], correct: [0] }]\n</script>`
+    );
+    expect(data?.[0]?.question).toBe('中文');
+  });
+
+  test('TS 类型标注（script setup lang="ts" 常见形态）同样提取', () => {
+    const data = parseQuizData(
+      `<script setup lang="ts">\nconst quizData: QuizItem[] = [{ question: 'TS', options: [], correct: [] }]\n</script>`
+    );
+    expect(data?.[0]?.question).toBe('TS');
+  });
+
+  test('非数组/函数/表达式一律回退 null（不执行）', () => {
+    expect(parseQuizData('<script setup>\nconst quizData = () => 1\n</script>')).toBeNull();
+    expect(parseQuizData('<script setup>\nconst quizData = { a: 1 }\n</script>')).toBeNull();
+    expect(parseQuizData('<script setup>\nfoo();\n</script>')).toBeNull();
+    // 未闭合数组：平衡扫描失败回退
+    expect(parseQuizData('<script setup>\nconst quizData = [1, 2\n</script>')).toBeNull();
+  });
+
+  test('字符串含未匹配引号/反斜杠边界不崩溃', () => {
+    const data = parseQuizData(
+      `<script setup>\nconst quizData = [{ question: 'a\\'b', options: [], correct: [] }]\n</script>`
+    );
+    expect(data).not.toBeNull();
+    expect((data?.[0]?.question as string).includes("a'b")).toBe(true);
+  });
+
+  test('注释（// 与 /* */）不干扰解析，\\xNN 转义生效', () => {
+    const data = parseQuizData(
+      `<script setup>\n// 题目数据\nconst quizData = [\n  { // 第一题\n    question: 'A\\x41 test', // 行尾注释\n    options: [{ label: 'A', text: '一' }],\n    /* 块注释 [ 不干扰括号计数 */\n    correct: [0]\n  }\n]\n</script>`
+    );
+    expect(data).not.toBeNull();
+    expect((data?.[0]?.question as string).includes('AA test')).toBe(true);
+    expect(data?.[0]?.correct).toEqual([0]);
+  });
+
+  test('__proto__ 键被跳过（解析产物只当纯数据，不许原型污染）', () => {
+    const data = parseQuizData(
+      `<script setup>\nconst quizData = [{ '__proto__': { polluted: 1 }, question: 'q', options: [], correct: [] }]\n</script>`
+    );
+    expect(data).not.toBeNull();
+    const entry = data?.[0] as Record<string, unknown>;
+    expect(entry.question).toBe('q');
+    expect(Object.getPrototypeOf(entry)).toBe(Object.prototype);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  test('畸形条目（null/裸值）不崩溃，原样返回由视图层降级', () => {
+    const data = parseQuizData(
+      `<script setup>\nconst quizData = [null, 42, 'x', { question: 'q', options: [], correct: [] }]\n</script>`
+    );
+    expect(data).toEqual([null, 42, 'x', { question: 'q', options: [], correct: [] }]);
   });
 });

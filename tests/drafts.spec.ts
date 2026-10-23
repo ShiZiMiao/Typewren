@@ -12,6 +12,7 @@ import {
   sendCommand,
   type AppHandle
 } from './helpers';
+import { coverageLaunchEnv, startCoverage } from './coverage';
 
 /* ============================================================
  * 崩溃恢复草稿（drafts.ts + fileService 定时落盘）
@@ -31,12 +32,13 @@ async function launch(
   const dataDir = opts.dataDir ?? join(WORK_DIR, `ud-${tag}`);
   const args = [OUT_MAIN, '--headless', `--user-data-dir=${dataDir}`, '--draft-interval=300'];
   if (opts.fileArg) args.push(opts.fileArg);
-  const app = await electron.launch({ args });
+  const app = await electron.launch({ args, env: coverageLaunchEnv() });
   const window = await app.firstWindow();
   await window.waitForLoadState('domcontentloaded');
   await window.waitForSelector('.ProseMirror', { timeout: 15000 });
   await window.waitForTimeout(300);
   const handle = { app, window };
+  await startCoverage(app, window);
   await installDialogStubs(handle, { discard: 1 });
   return handle;
 }

@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { closeApp, launchApp, loadContent, sendCommand, type AppHandle } from './helpers';
@@ -101,6 +102,55 @@ test.describe('导出', () => {
     expect(html).not.toContain('url(fonts/');
   });
 
+  test('导出 HTML：details 折叠块与答题卡片内容不丢（0.8.0 回归）', async () => {
+    const DETAILS_QUIZ_MD = `# 综合
+
+<details>
+<summary>点击查看参考答案</summary>
+
+- 归一化通过控制每一层的激活分布
+
+</details>
+
+<script setup>
+const quizData = [
+  {
+    question: '梯度消失问题的根本原因？',
+    type: 'single',
+    options: [
+      { label: 'A', text: '学习率设置太小' },
+      { label: 'B', text: '深层的分布失控' }
+    ],
+    correct: [1],
+    explanation: '<strong>正确答案： B</strong>'
+  }
+]
+</script>
+
+<InteractiveQuiz :questions="quizData" quiz-id="normalization" />
+`;
+    await loadContent(app, DETAILS_QUIZ_MD);
+    try {
+      rmSync(HTML_OUT);
+    } catch {
+      // 文件不存在则忽略
+    }
+    await triggerExport('html');
+
+    await expectFileEventually(HTML_OUT, (buf) =>
+      buf.toString('utf-8').includes('<!DOCTYPE html>')
+    );
+    const html = readFileSync(HTML_OUT, 'utf-8');
+    // details：summary 文本 + 内部列表（toDOM 槽位——旧版输出空 details 内容全丢）
+    expect(html).toContain('<details');
+    expect(html).toContain('点击查看参考答案');
+    expect(html).toContain('归一化通过控制每一层的激活分布');
+    // 答题卡片：题面与选项进导出（toDOM 静态镜像，旧版输出空 div）
+    expect(html).toContain('梯度消失问题的根本原因');
+    expect(html).toContain('学习率设置太小');
+    expect(html).toContain('深层的分布失控');
+  });
+
   test('导出 PDF 生成有效文件', async () => {
     await loadContent(app, SAMPLE_MD);
     try {
@@ -129,6 +179,143 @@ test.describe('导出', () => {
       DOCX_OUT,
       (buf) => buf.length > 512 && buf.slice(0, 2).toString('latin1') === 'PK'
     );
+  });
+
+  test('docx 硬换行是真 <w:br/>（fix 回归：\'\\n\' 占位在 Word 里不换行）', async () => {
+    // 硬换行 = 行尾两空格 + 换行（同一段落内换行）
+    await loadContent(app, '第一行内容  \n第二行内容\n');
+    try {
+      rmSync(DOCX_OUT);
+    } catch {
+      // 文件不存在则忽略
+    }
+    await triggerExport('docx');
+    await expectFileEventually(
+      DOCX_OUT,
+      (buf) => buf.length > 512 && buf.slice(0, 2).toString('latin1') === 'PK'
+    );
+
+    // 解包 word/document.xml 验证（zip 用 Windows 自带 bsdtar，GNU tar 不认 zip）
+    const extractDir = mkdtempSync(join(tmpdir(), 'typewren-docx-br-'));
+    const tar = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
+    execSync(`"${tar}" -xf "${DOCX_OUT}" -C "${extractDir}" word/document.xml`);
+    const xml = readFileSync(join(extractDir, 'word', 'document.xml'), 'utf-8');
+    rmSync(extractDir, { recursive: true, force: true });
+
+    // 真 <w:br/> 分隔上下行文本（旧行为是 '\n' 文本 run，Word 里不换行）
+    expect(xml).toContain('<w:br/>');
+    const para = xml.match(/<w:p[ >][\s\S]*?<\/w:p>/)?.[0] ?? '';
+    expect(para).toContain('第一行内容');
+    expect(para).toContain('第二行内容');
+    expect(para.indexOf('第一行内容')).toBeLessThan(para.indexOf('<w:br/>'));
+    expect(para.indexOf('<w:br/>')).toBeLessThan(para.indexOf('第二行内容'));
+  });
+
+  test('docx 富结构：链接/引用/任务/有序列表/行内格式全落 XML', async () => {
+    const RICH_MD = `# 标题一
+
+普通 **加粗** *斜体* ~~删除~~ \`行码\` 与[链接](https://example.com)。
+
+> 引用段落
+
+- [x] 已完成任务
+- [ ] 未完成任务
+
+1. 有序一
+2. 有序二
+
+- 普通项
+
+硬上行␣␣
+硬下行
+`.replace('␣␣', '  ');
+    await loadContent(app, RICH_MD);
+    try {
+      rmSync(DOCX_OUT);
+    } catch {
+      // 文件不存在则忽略
+    }
+    await triggerExport('docx');
+    await expectFileEventually(
+      DOCX_OUT,
+      (buf) => buf.length > 512 && buf.slice(0, 2).toString('latin1') === 'PK'
+    );
+
+    const extractDir = mkdtempSync(join(tmpdir(), 'typewren-docx-rich-'));
+    const tar = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
+    execSync(
+      `"${tar}" -xf "${DOCX_OUT}" -C "${extractDir}" word/document.xml word/_rels/document.xml.rels`
+    );
+    const xml = readFileSync(join(extractDir, 'word', 'document.xml'), 'utf-8');
+    const rels = readFileSync(join(extractDir, 'word', '_rels', 'document.xml.rels'), 'utf-8');
+    rmSync(extractDir, { recursive: true, force: true });
+
+    // 硬换行真 <w:br/>
+    expect(xml).toContain('<w:br/>');
+    // 任务列表复选标记（退化成普通列表即回归）
+    expect(xml).toContain('☑');
+    expect(xml).toContain('☐');
+    // 有序列表产生 numbering 引用（普通段落无 numPr）
+    expect(xml).toContain('<w:numPr>');
+    // 引用块缩进 + 左边框（CCCCCI 色）
+    expect(xml).toContain('CCCCCC');
+    // 行内代码 Consolas、加粗/斜体/删除线的 run 属性
+    expect(xml).toContain('Consolas');
+    expect(xml).toMatch(/<w:b\/>/);
+    expect(xml).toMatch(/<w:i\/>/);
+    expect(xml).toMatch(/<w:strike\/>/);
+    // 超链接进关系表 + 正文含 hyperlink 元素
+    expect(rels).toContain('https://example.com');
+    expect(xml).toContain('<w:hyperlink');
+  });
+
+  test('export:document 畸形 docxBlocks 防御（归一化丢弃 + toc/默认分支）', async () => {
+    const res = await app.window.evaluate(async () => {
+      return (
+        window as unknown as {
+          typewren: {
+            exportDocument: (p: unknown) => Promise<{ ok: boolean; canceled: boolean }>;
+          };
+        }
+      ).typewren.exportDocument({
+        kind: 'docx',
+        html: '',
+        suggestedName: 'guard-test.docx',
+        docxBlocks: [
+          {
+            type: 'paragraph',
+            runs: [
+              { text: 123 },
+              null,
+              { text: '链接', href: 'https://x.example' },
+              { text: '换行', break: true },
+              { text: '下划', underline: true },
+              { text: '删除', strike: true }
+            ],
+            level: 0,
+            quote: true
+          },
+          { type: 'paragraph', runs: [{ text: '任务行', bold: true }], level: 0, bullet: 'task', checked: true },
+          { type: 'paragraph', runs: [{ text: '未勾任务', code: true }], level: 1, bullet: 'task', checked: false },
+          { type: 'paragraph', runs: [{ text: '有序' }], level: 0, bullet: 'ordered' },
+          { type: 'paragraph', runs: [{ text: '无序' }], level: 2, bullet: 'bullet' },
+          { type: 'paragraph', runs: [{ text: '平段' }], level: 'bad', bullet: 42, quote: 'yes' },
+          { type: 'heading', level: 3, runs: [{ text: 'H3' }] },
+          { type: 'code', text: 'x = 1', language: 'python' },
+          { type: 'table', rows: [[null, [{ text: '格' }], 'junk']], header: false },
+          { type: 'toc' },
+          { type: 'raw', text: '$$x$$' },
+          { type: 'rule' },
+          { type: 'weird', text: '默认分支' },
+          'junk',
+          null,
+          { type: 42 }
+        ]
+      });
+    });
+    // 全部畸形条目被归一化丢弃，导出仍然成功（不让 docx 库抛错）
+    expect(res.ok).toBe(true);
+    expect(res.canceled ?? false).toBe(false);
   });
 
   test('导出 PNG 生成有效图片文件', async () => {
@@ -253,4 +440,71 @@ test.describe('导出图片', () => {
     const plainRun = para!.runs!.find((r) => r.text.includes('行内'));
     expect(plainRun!.code).toBeFalsy();
   });
+
+  test('docx 含 details summary/内部列表与答题卡片题目选项（0.8.0 回归）', async () => {
+    // 拦截 export:document 校验渲染层产出的块结构（与上一用例同一手法，桩自装不依赖顺序）
+    await app.app.evaluate(({ ipcMain }) => {
+      const g = globalThis as unknown as { __docxBlocks?: unknown };
+      g.__docxBlocks = undefined;
+      ipcMain.removeHandler('export:document');
+      ipcMain.handle('export:document', (_event, payload: unknown) => {
+        const p = payload as { docxBlocks?: unknown };
+        g.__docxBlocks = p.docxBlocks;
+        return { ok: true, canceled: false, path: '' };
+      });
+    });
+
+    const MD = `# 综合
+
+<details>
+<summary>点击查看参考答案</summary>
+
+- 归一化通过控制每一层的激活分布
+
+</details>
+
+<script setup>
+const quizData = [
+  {
+    question: '梯度消失的根本原因？',
+    type: 'single',
+    options: [
+      { label: 'A', text: '学习率太小' },
+      { label: 'B', text: '深层分布失控' }
+    ],
+    correct: [1]
+  }
+]
+</script>
+
+<InteractiveQuiz :questions="quizData" quiz-id="docx" />
+`;
+    await loadContent(app, MD);
+    await triggerExport('docx');
+
+    await expect
+      .poll(() =>
+        app.app.evaluate(() => {
+          const g = globalThis as unknown as { __docxBlocks?: unknown };
+          return Array.isArray(g.__docxBlocks);
+        })
+      )
+      .toBe(true);
+
+    const blocks = await app.app.evaluate(() => {
+      const g = globalThis as unknown as {
+        __docxBlocks?: { type: string; runs?: { text: string }[] }[];
+      };
+      return g.__docxBlocks!;
+    });
+    const texts = blocks.map((b) => (b.runs ?? []).map((r) => r.text).join(''));
+    // details：summary 是属性，旧版直接下探整条丢；内部列表随容器下探导出
+    expect(texts.some((t) => t.includes('点击查看参考答案'))).toBe(true);
+    expect(texts.some((t) => t.includes('归一化通过控制每一层的激活分布'))).toBe(true);
+    // 答题卡片：原子节点旧版整卡丢——题面与选项都要进导出
+    expect(texts.some((t) => t.includes('梯度消失的根本原因'))).toBe(true);
+    expect(texts.some((t) => t.includes('学习率太小'))).toBe(true);
+    expect(texts.some((t) => t.includes('深层分布失控'))).toBe(true);
+  });
+
 });

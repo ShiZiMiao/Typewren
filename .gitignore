@@ -19,6 +19,7 @@ npm-debug.log*
 test-results/
 tests-tmp/
 playwright-report/
+.coverage-raw/
 
 # OS
 .DS_Store

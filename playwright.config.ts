@@ -2,6 +2,8 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
+  // 构建防呆：src/ 比 out/ 新时直接报错退出（勿被陈旧构建误导）
+  globalSetup: './tests/globalSetup',
   timeout: 30000,
   expect: {
     timeout: 10000

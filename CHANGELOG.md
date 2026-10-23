@@ -1,5 +1,55 @@
 # 更新日志
 
+## [0.8.0] - 2026-10-22
+
+### 新增
+
+- **YAML Front Matter 渲染**：文档开头 `--- ... ---` 元信息块不再混入正文/大纲，
+  渲染为 Typora 式浅灰卡片（原样 `key: value` 文本行，与引用块同色），
+  保存 roundtrip 保真
+- **Raw HTML 真实渲染**：普通 HTML（`<strong>`/`<br>`/`<table>` 等）净化后渲染
+  （白名单标签 + 属性剥离 + 链接协议白名单，事件属性与 `style` 一律丢弃）；
+  `<script>`/`<style>` 按浏览器行为隐藏（站点构建期源码不执行，源码模式可查）；
+  未知标签（Vue 组件等）保留原文，孤儿闭合标签渲染为空
+- **`<details>` 折叠块**：开/闭标签与中间 Markdown 合并为容器节点——点击
+  summary 真实收起/展开（内部列表/代码块等可编辑），`<details open>` 默认
+  展开态保留，保存结构完整往返
+- **`<InteractiveQuiz/>` 答题卡片**（VitePress 式站点形态）：安全解析
+  `<script setup>` 中的题目数据（quizData/questions 等变量名通用，
+  无 eval），渲染为 Q 徽标 + 题面 + 单选项卡片（选中正确绿/错误红），
+  选中后显示解析说明（HTML 净化渲染）；多组件按出现顺序对应数据块；
+  保存还原原始组件标签（数据不落盘）
+- **导出同步**：PDF/HTML/docx 导出不再丢失 details 折叠块与答题卡片内容
+  （导出物含 summary/列表/题目/选项的完整静态呈现）
+
+### 修复（发版前审查驱动）
+
+- `<details open>` 保存一次就丢默认展开态（序列化开标签漏写 open 属性）
+- 源码模式往返后答题卡片/HTML 块视图更新留下孤儿 DOM（PM 持旧 dom 引用）、
+  选项选中态被无关编辑打断
+- 答题卡片数据混入 null/裸值时节点视图崩溃；解析器 `__proto__` 键原型污染防御
+- docx 硬换行是 `'\n'` 占位（Word 里不换行）→ 真 `<w:br/>`；
+  且旧判定节点名拼错（`hard_break` ≠ `hardbreak`）实为死代码、前后文本直接粘连
+- docx 导出丢 `<details>` summary 与答题卡片整卡（原子节点下探即丢）→ 静态文本导出
+- 图片文件名含 `%` 的引用解码歧义（`50%25.png` 解码成 `50%.png` 404）→
+  读盘兜底按「URI 解码后同名」唯一命中消歧
+
+### 工程
+
+- 净化器收敛为单一来源（htmlSanitize），HTML 渲染入口统一安全口径
+- 解析器独立成纯函数模块并补齐边界（Unicode/`\x` 转义、`//` 与 `/* */` 注释）
+- editor 层解除对 services/ui 的反向依赖（exportDocument 收纯数据参数、
+  mermaid 主题改依赖注入）
+- e2e 构建防呆：src/ 比 out/ 新时全局报错退出（勿被陈旧构建误导）；
+  SSRF 拒绝路径 e2e（--headless 真实模式补环回/私有/云元数据目标拒绝断言）
+- 全量回归 312 → 343 例；新增 V8 行覆盖率工作流（`npm run test:cov`，
+  CDP 渲染层 + NODE_V8_COVERAGE 主进程，sourcemap 映射回 src 源文件）——
+  行覆盖 98.4%（渲染层与 shared 100%），残余集中在主进程异常/崩溃/显示路径，
+  逐条性质见 TODO.md
+- 发版前审查：js-yaml/brace-expansion 安全升级、katex 经 overrides 归一 0.18.9
+  （安装包携带的 runtime 依赖 0 漏洞）、全量格式化、共享设施重构、
+  模块命名规范（interactiveQuiz / quizDataParser）
+
 ## [0.7.2] - 2026-09-22
 
 ### 修复

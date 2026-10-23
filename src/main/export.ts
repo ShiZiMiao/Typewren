@@ -37,6 +37,8 @@ interface DocxTextLike {
   code?: boolean;
   underline?: boolean;
   href?: string;
+  /** 硬换行 run：输出真 <w:br/>（text 恒为空串） */
+  break?: boolean;
 }
 
 interface DocxBlockLike {
@@ -53,6 +55,8 @@ interface DocxBlockLike {
 }
 
 function runOf(t: DocxTextLike): TextRun {
+  // 硬换行：break:1 的空 TextRun 即 <w:r><w:br/></w:r>（'\n' 文本在 Word 里不换行）
+  if (t.break) return new TextRun({ text: '', break: 1 });
   return new TextRun({
     text: t.text,
     bold: t.bold,
@@ -78,6 +82,7 @@ function normalizeRuns(value: unknown): DocxTextLike[] {
     if (typeof r.code === 'boolean') run.code = r.code;
     if (typeof r.underline === 'boolean') run.underline = r.underline;
     if (typeof r.href === 'string') run.href = r.href;
+    if (typeof r.break === 'boolean') run.break = r.break;
     out.push(run);
   }
   return out;

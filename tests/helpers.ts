@@ -4,6 +4,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { coverageLaunchEnv, startCoverage, stopCoverage } from './coverage';
+
 /* ============================================================
  * 测试公共辅助
  * 统一的应用启动 / 文档注入 / 命令注入 / 对话框打桩，
@@ -26,13 +28,18 @@ export async function launchApp(extraArgs: string[] = []): Promise<AppHandle> {
   const isolatedArgs = hasUserDataDir
     ? []
     : [`--user-data-dir=${mkdtempSync(join(tmpdir(), 'typewren-test-'))}`];
-  const app = await electron.launch({ args: ['--test', OUT_MAIN, ...extraArgs, ...isolatedArgs] });
+  const app = await electron.launch({
+    args: ['--test', OUT_MAIN, ...extraArgs, ...isolatedArgs],
+    env: coverageLaunchEnv()
+  });
   const window = await app.firstWindow();
   await window.waitForLoadState('domcontentloaded');
   await window.waitForSelector('.ProseMirror', { timeout: 15000 });
   // 等 Milkdown 首帧渲染与启动基线落定
   await window.waitForTimeout(600);
   const handle = { app, window };
+  // 覆盖率采集（TW_COV=1 时启用，见 tests/coverage.ts）
+  await startCoverage(app, window);
   // 默认安装对话框打桩：新代码路径（外部修改确认等）意外触达原生弹窗时
   // 不会挂死测试；需要特定选择的用例再 setDialog 覆盖
   await installDialogStubs(handle);
@@ -40,7 +47,17 @@ export async function launchApp(extraArgs: string[] = []): Promise<AppHandle> {
 }
 
 export async function closeApp(handle: AppHandle): Promise<void> {
+  await stopCoverage(handle.app);
+  const proc = handle.app.process();
   await handle.app.close().catch(() => {});
+  // 等进程真正退出：NODE_V8_COVERAGE 在退出时落盘（覆盖率模式下保证 dump 就位）；
+  // close 被关闭保护挡住而进程未退时 2s 兜底放行，不挂死用例
+  if (proc && proc.exitCode === null) {
+    await Promise.race([
+      new Promise((r) => proc.once('exit', r)),
+      new Promise((r) => setTimeout(r, 2000))
+    ]);
+  }
 }
 
 /** 经主进程注入文档内容（走 open-file-path 正常加载流程），等待渲染完成 */

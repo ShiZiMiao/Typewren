@@ -54,11 +54,9 @@ function enqueueWrite(): void {
   writeChain = writeChain.then(() => {
     const snapshot = cache;
     if (!snapshot) return;
-    return fsp
-      .writeFile(settingsFile(), JSON.stringify(snapshot, null, 2), 'utf-8')
-      .catch(() => {
-        // 设置是偏好功能，写失败不打扰（下次启动回落上次成功值）
-      });
+    return fsp.writeFile(settingsFile(), JSON.stringify(snapshot, null, 2), 'utf-8').catch(() => {
+      // 设置是偏好功能，写失败不打扰（下次启动回落上次成功值）
+    });
   });
 }
 

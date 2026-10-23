@@ -158,7 +158,9 @@ export function htmlNotesToPlainText(html: string): string {
 export function formatReleaseNotes(notes: unknown): string {
   const raw = Array.isArray(notes)
     ? notes
-        .map((n) => (typeof n === 'object' && n ? String((n as { note?: unknown }).note ?? '') : ''))
+        .map((n) =>
+          typeof n === 'object' && n ? String((n as { note?: unknown }).note ?? '') : ''
+        )
         .join('\n\n')
     : String(notes ?? '');
   const text = htmlNotesToPlainText(raw);

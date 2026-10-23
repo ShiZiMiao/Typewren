@@ -97,7 +97,12 @@ test.describe('布局骨架', () => {
       (
         window as unknown as {
           typewren: {
-            popupMenu: (label: string, x: number, y: number, states?: Record<string, boolean>) => void;
+            popupMenu: (
+              label: string,
+              x: number,
+              y: number,
+              states?: Record<string, boolean>
+            ) => void;
           };
         }
       ).typewren.popupMenu('文件', 7.5, 300.25, { 'view:focus-mode': true })
@@ -106,7 +111,12 @@ test.describe('布局骨架', () => {
       (
         window as unknown as {
           typewren: {
-            popupMenu: (label: string, x: number, y: number, states?: Record<string, boolean>) => void;
+            popupMenu: (
+              label: string,
+              x: number,
+              y: number,
+              states?: Record<string, boolean>
+            ) => void;
           };
         }
       ).typewren.popupMenu('不存在的顶级项', 10, 10, undefined)
