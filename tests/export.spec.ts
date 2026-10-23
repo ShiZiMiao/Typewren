@@ -181,7 +181,7 @@ const quizData = [
     );
   });
 
-  test('docx 硬换行是真 <w:br/>（fix 回归：\'\\n\' 占位在 Word 里不换行）', async () => {
+  test("docx 硬换行是真 <w:br/>（fix 回归：'\\n' 占位在 Word 里不换行）", async () => {
     // 硬换行 = 行尾两空格 + 换行（同一段落内换行）
     await loadContent(app, '第一行内容  \n第二行内容\n');
     try {
@@ -295,8 +295,20 @@ const quizData = [
             level: 0,
             quote: true
           },
-          { type: 'paragraph', runs: [{ text: '任务行', bold: true }], level: 0, bullet: 'task', checked: true },
-          { type: 'paragraph', runs: [{ text: '未勾任务', code: true }], level: 1, bullet: 'task', checked: false },
+          {
+            type: 'paragraph',
+            runs: [{ text: '任务行', bold: true }],
+            level: 0,
+            bullet: 'task',
+            checked: true
+          },
+          {
+            type: 'paragraph',
+            runs: [{ text: '未勾任务', code: true }],
+            level: 1,
+            bullet: 'task',
+            checked: false
+          },
           { type: 'paragraph', runs: [{ text: '有序' }], level: 0, bullet: 'ordered' },
           { type: 'paragraph', runs: [{ text: '无序' }], level: 2, bullet: 'bullet' },
           { type: 'paragraph', runs: [{ text: '平段' }], level: 'bad', bullet: 42, quote: 'yes' },
@@ -506,5 +518,4 @@ const quizData = [
     expect(texts.some((t) => t.includes('学习率太小'))).toBe(true);
     expect(texts.some((t) => t.includes('深层分布失控'))).toBe(true);
   });
-
 });

@@ -600,9 +600,7 @@ test.describe('main/images 扩展名兜底链与 SSRF 主机判定', () => {
     expect(disambiguatePercentName(join(dir, 'plain.png'), ['50%25.png'])).toBeNull();
     // 无命中 / 多命中维持 404，不猜（%2A 与 %2a 两名解码同形 → 多命中）
     expect(disambiguatePercentName(wanted, ['other.png'])).toBeNull();
-    expect(
-      disambiguatePercentName(join(dir, '50*.png'), ['50%2A.png', '50%2a.png'])
-    ).toBeNull();
+    expect(disambiguatePercentName(join(dir, '50*.png'), ['50%2A.png', '50%2a.png'])).toBeNull();
     // 非图片扩展名不顶上（与落盘/读盘同一安全口径）
     expect(disambiguatePercentName(wanted, ['50%25.txt'])).toBeNull();
     // 解码后名字不同的（标准双编码 50%2525.png → 50%25.png）不误顶

@@ -96,5 +96,7 @@ for (const [file, cov] of Object.entries(filtered.toJSON())) {
   const lines = [...missed].sort((a, b) => a - b);
   const shown = lines.slice(0, 40).join(', ');
   const more = lines.length > 40 ? ` …共 ${lines.length} 行` : '';
-  console.log(`${file.replace(/\\/g, '/').replace(process.cwd().replace(/\\/g, '/') + '/', '')}: ${shown}${more}`);
+  console.log(
+    `${file.replace(/\\/g, '/').replace(process.cwd().replace(/\\/g, '/') + '/', '')}: ${shown}${more}`
+  );
 }

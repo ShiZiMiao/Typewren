@@ -33,11 +33,16 @@ interface TypewrenLike {
 }
 
 /** 在渲染层直接以任意载荷调用（经 preload 透传，不做客户端校验——正测主进程防线） */
-function call<T>(window: AppHandle['window'], method: keyof TypewrenLike, payload?: unknown): Promise<T> {
+function call<T>(
+  window: AppHandle['window'],
+  method: keyof TypewrenLike,
+  payload?: unknown
+): Promise<T> {
   return window.evaluate(
     ({ m, p }) => {
-      const t = (window as unknown as { typewren: Record<string, (x?: unknown) => Promise<unknown>> })
-        .typewren;
+      const t = (
+        window as unknown as { typewren: Record<string, (x?: unknown) => Promise<unknown>> }
+      ).typewren;
       return t[m](p) as Promise<T>;
     },
     { m: method, p: payload }
@@ -88,9 +93,7 @@ test('file:write 写盘失败：showErrorBox 收场并返回 false（关闭保�
       g.__errBoxes.push(`${t}|${c}`);
     };
   });
-  expect(
-    await call<boolean>(app.window, 'writeFile', { path: trapped, content: 'x' })
-  ).toBe(false);
+  expect(await call<boolean>(app.window, 'writeFile', { path: trapped, content: 'x' })).toBe(false);
   const boxes = await app.app.evaluate(
     () => (globalThis as unknown as { __errBoxes: string[] }).__errBoxes ?? []
   );
@@ -116,9 +119,9 @@ test('dir:list 防御：文档目录子树外拒绝、畸形载荷拒绝', async
   });
   expect(entries.length).toBeGreaterThan(0);
   // 子树外（系统目录）拒绝 → 空列表
-  expect(
-    await call<unknown[]>(app.window, 'listDir', { docPath, dirPath: 'C:\\Windows' })
-  ).toEqual([]);
+  expect(await call<unknown[]>(app.window, 'listDir', { docPath, dirPath: 'C:\\Windows' })).toEqual(
+    []
+  );
   // 畸形载荷拒绝
   expect(await call<unknown[]>(app.window, 'listDir', null)).toEqual([]);
   expect(await call<unknown[]>(app.window, 'listDir', { docPath: 42, dirPath: dir })).toEqual([]);

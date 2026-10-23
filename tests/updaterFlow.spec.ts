@@ -106,25 +106,23 @@ function forcePackaged(app: ElectronApplication): Promise<void> {
 }
 
 function setCheckConfig(app: ElectronApplication, cfg: Partial<CheckConfig>): Promise<void> {
-  return app.evaluate(
-    (_mods, c) => {
-      Object.assign((globalThis as unknown as { __upd: UpdState }).__upd.check, c as CheckConfig);
-    },
-    cfg as CheckConfig
-  );
+  return app.evaluate((_mods, c) => {
+    Object.assign((globalThis as unknown as { __upd: UpdState }).__upd.check, c as CheckConfig);
+  }, cfg as CheckConfig);
 }
 
 function queueDialogs(app: ElectronApplication, picks: number[]): Promise<void> {
-  return app.evaluate(
-    (_mods, q) => {
-      (globalThis as unknown as { __upd: UpdState }).__upd.dlgQueue.push(...(q as number[]));
-    },
-    picks as number[]
-  );
+  return app.evaluate((_mods, q) => {
+    (globalThis as unknown as { __upd: UpdState }).__upd.dlgQueue.push(...(q as number[]));
+  }, picks as number[]);
 }
 
 /** 主进程向 autoUpdater 单例派发事件（驱动下载生命周期） */
-function emitUpdaterEvent(app: ElectronApplication, event: string, payload: unknown): Promise<void> {
+function emitUpdaterEvent(
+  app: ElectronApplication,
+  event: string,
+  payload: unknown
+): Promise<void> {
   return app.evaluate(
     (_mods, a) => {
       const { createRequire } = process.getBuiltinModule('module') as typeof import('module');
@@ -184,9 +182,9 @@ test('更新主流程：发现新版→下载中再检查→进度→就绪→�
 
     // ② 下载启动 → 转圈提示卡
     await expect(handle.window.locator('#update-download-panel')).toBeVisible({ timeout: 5000 });
-    await expect(
-      handle.window.locator('#update-download-panel .udp-meta')
-    ).toHaveText(/正在获取安装包/);
+    await expect(handle.window.locator('#update-download-panel .udp-meta')).toHaveText(
+      /正在获取安装包/
+    );
 
     // ③ 下载中再检查：告知进度、不重复下载
     await clickCheckUpdate(handle.app);
@@ -291,7 +289,9 @@ test('更新流程：下载失败弹框（latest.yml 缺失的友好文案）', 
     await expect
       .poll(async () => (await dlgByMessage(app.app, '更新下载失败')).length, { timeout: 5000 })
       .toBe(1);
-    expect((await dlgByMessage(app.app, '更新下载失败'))[0].detail).toContain('更新源缺少 latest.yml');
+    expect((await dlgByMessage(app.app, '更新下载失败'))[0].detail).toContain(
+      '更新源缺少 latest.yml'
+    );
   } finally {
     await closeApp(app);
   }

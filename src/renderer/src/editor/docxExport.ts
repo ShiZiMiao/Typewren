@@ -173,9 +173,10 @@ function pushQuizBlocks(blocks: DocxBlock[], dataJson: string): void {
     });
     const options = Array.isArray(q.options) ? q.options : [];
     options.forEach((option, oi) => {
-      const o = (
-        option !== null && typeof option === 'object' ? option : {}
-      ) as { label?: unknown; text?: unknown };
+      const o = (option !== null && typeof option === 'object' ? option : {}) as {
+        label?: unknown;
+        text?: unknown;
+      };
       const label = String(o.label ?? QUIZ_ANSWER_LABELS[oi] ?? '?');
       blocks.push({
         type: 'paragraph',

@@ -111,9 +111,7 @@ function mergeDetails(children: MdNode[]): MdNode[] {
       }
     }
     // 只认独立的 open 属性（`(?:^|\s)open(?=\s|=|>|$)`），data-open/opened 不算
-    const open = /(?:^|\s)open(?:\s|=|>|$)/i.test(
-      fence.first.replace(/^<\s*details/i, '')
-    );
+    const open = /(?:^|\s)open(?:\s|=|>|$)/i.test(fence.first.replace(/^<\s*details/i, ''));
 
     const closeFence = htmlFence(children[end]);
     const closeRest = (closeFence?.lines.slice(1) ?? []).join('\n');
@@ -138,17 +136,17 @@ const detailsMarkdownExtension = {
       state: unknown,
       info: unknown
     ): string {
-    const n = node as unknown as { summary?: string; open?: boolean; children?: unknown[] };
-    const summary = escapeHtml(String(n.summary ?? ''));
-    // attrs.open 必须落回开标签——否则 <details open> 保存一次就丢默认展开态
-    const openTag = n.open ? '<details open>' : '<details>';
-    const body = (
-      state as { containerFlow: (node: unknown, info: unknown) => string }
-    ).containerFlow(node, info);
-    if (!body.trim()) {
-      return `${openTag}\n<summary>${summary}</summary>\n</details>`;
-    }
-    return `${openTag}\n<summary>${summary}</summary>\n\n${body}\n</details>`;
+      const n = node as unknown as { summary?: string; open?: boolean; children?: unknown[] };
+      const summary = escapeHtml(String(n.summary ?? ''));
+      // attrs.open 必须落回开标签——否则 <details open> 保存一次就丢默认展开态
+      const openTag = n.open ? '<details open>' : '<details>';
+      const body = (
+        state as { containerFlow: (node: unknown, info: unknown) => string }
+      ).containerFlow(node, info);
+      if (!body.trim()) {
+        return `${openTag}\n<summary>${summary}</summary>\n</details>`;
+      }
+      return `${openTag}\n<summary>${summary}</summary>\n\n${body}\n</details>`;
     }
   }
 };

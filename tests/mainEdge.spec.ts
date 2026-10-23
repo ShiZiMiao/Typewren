@@ -57,24 +57,21 @@ async function installDlgRecorder(app: ElectronApplication): Promise<void> {
 
 /** 程序化点击应用菜单项（按 label 前缀，遍历子菜单） */
 function clickMenuItem(app: ElectronApplication, labelPrefix: string): Promise<boolean> {
-  return app.evaluate(
-    ({ Menu }, prefix) => {
-      const find = (items: Electron.MenuItem[]): Electron.MenuItem | null => {
-        for (const item of items) {
-          if (item.label === prefix) return item;
-          if (item.submenu) {
-            const hit = find(item.submenu.items);
-            if (hit) return hit;
-          }
+  return app.evaluate(({ Menu }, prefix) => {
+    const find = (items: Electron.MenuItem[]): Electron.MenuItem | null => {
+      for (const item of items) {
+        if (item.label === prefix) return item;
+        if (item.submenu) {
+          const hit = find(item.submenu.items);
+          if (hit) return hit;
         }
-        return null;
-      };
-      const item = find(Menu.getApplicationMenu()?.items ?? []);
-      item?.click();
-      return !!item;
-    },
-    labelPrefix
-  );
+      }
+      return null;
+    };
+    const item = find(Menu.getApplicationMenu()?.items ?? []);
+    item?.click();
+    return !!item;
+  }, labelPrefix);
 }
 
 test('原生菜单项真实点击：命令转发 / 关于框 / 最近文件项', async () => {
@@ -91,11 +88,14 @@ test('原生菜单项真实点击：命令转发 / 关于框 / 最近文件项',
     // ② 关于框（showMessageBox 异步路径）
     expect(await clickMenuItem(app.app, '关于 Typewren')).toBe(true);
     await expect
-      .poll(async () => (await dlgLog(app.app)).filter((d) => (d.title + d.message).includes('关于')).length, {
-        timeout: 5000
-      })
+      .poll(
+        async () =>
+          (await dlgLog(app.app)).filter((d) => (d.title + d.message).includes('关于')).length,
+        {
+          timeout: 5000
+        }
+      )
       .toBe(1);
-
   } finally {
     await closeApp(app);
     rmSync(dir, { recursive: true, force: true });
@@ -142,10 +142,11 @@ test('原生菜单「最近文件」项点击（--headless 真实模式；--test
     await installDlgRecorder(launched);
 
     // openFileInNewWindow → 新窗 take-pending-open 以 recent 标记登记
-    await window.evaluate((path) =>
-      (
-        window as unknown as { typewren: { openFileInNewWindow: (p: string) => void } }
-      ).typewren.openFileInNewWindow(path),
+    await window.evaluate(
+      (path) =>
+        (
+          window as unknown as { typewren: { openFileInNewWindow: (p: string) => void } }
+        ).typewren.openFileInNewWindow(path),
       p
     );
     const recentLabels = () =>
@@ -181,16 +182,20 @@ test('did-fail-load：主框加载失败销毁窗口 + 异步错误框（-3 中�
     const secondDir = mkdtempSync(join(tmpdir(), 'typewren-failload-'));
     const second = join(secondDir, 'second.md');
     writeFileSync(second, '# second' + String.fromCharCode(10), 'utf-8');
-    await app.window.evaluate((path) =>
-      (
-        window as unknown as { typewren: { openFileInNewWindow: (p: string) => void } }
-      ).typewren.openFileInNewWindow(path),
+    await app.window.evaluate(
+      (path) =>
+        (
+          window as unknown as { typewren: { openFileInNewWindow: (p: string) => void } }
+        ).typewren.openFileInNewWindow(path),
       second
     );
     await expect
-      .poll(async () => app.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), {
-        timeout: 8000
-      })
+      .poll(
+        async () => app.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length),
+        {
+          timeout: 8000
+        }
+      )
       .toBe(2);
     await app.app.evaluate(() => {
       (globalThis as unknown as { __dlgLog: unknown[] }).__dlgLog = [];
@@ -237,9 +242,13 @@ test('did-fail-load：主框加载失败销毁窗口 + 异步错误框（-3 中�
     });
     await closed;
     await expect
-      .poll(async () => (await dlgLog(app.app)).filter((d) => d.message.includes('无法加载编辑器界面')).length, {
-        timeout: 5000
-      })
+      .poll(
+        async () =>
+          (await dlgLog(app.app)).filter((d) => d.message.includes('无法加载编辑器界面')).length,
+        {
+          timeout: 5000
+        }
+      )
       .toBe(1);
     const box = (await dlgLog(app.app)).find((d) => d.message.includes('无法加载编辑器界面'))!;
     expect(box.detail).toContain('（错误码');
@@ -261,16 +270,21 @@ test('重复打开同一文档：转到已有窗口 / 仍在新窗口打开', as
     await app.app.evaluate(() => {
       (globalThis as unknown as { __dlgQueue: number[] }).__dlgQueue.push(0);
     });
-    await app.window.evaluate((path) =>
-      (
-        window as unknown as { typewren: { openFileInNewWindow: (p: string) => void } }
-      ).typewren.openFileInNewWindow(path),
+    await app.window.evaluate(
+      (path) =>
+        (
+          window as unknown as { typewren: { openFileInNewWindow: (p: string) => void } }
+        ).typewren.openFileInNewWindow(path),
       p
     );
     await expect
-      .poll(async () => (await dlgLog(app.app)).filter((d) => d.message.includes('已在其它窗口打开')).length, {
-        timeout: 5000
-      })
+      .poll(
+        async () =>
+          (await dlgLog(app.app)).filter((d) => d.message.includes('已在其它窗口打开')).length,
+        {
+          timeout: 5000
+        }
+      )
       .toBeGreaterThan(0);
     const wins1 = await app.app.evaluate(
       ({ BrowserWindow }) => BrowserWindow.getAllWindows().length
@@ -281,16 +295,20 @@ test('重复打开同一文档：转到已有窗口 / 仍在新窗口打开', as
     await app.app.evaluate(() => {
       (globalThis as unknown as { __dlgQueue: number[] }).__dlgQueue.push(1);
     });
-    await app.window.evaluate((path) =>
-      (
-        window as unknown as { typewren: { openFileInNewWindow: (p: string) => void } }
-      ).typewren.openFileInNewWindow(path),
+    await app.window.evaluate(
+      (path) =>
+        (
+          window as unknown as { typewren: { openFileInNewWindow: (p: string) => void } }
+        ).typewren.openFileInNewWindow(path),
       p
     );
     await expect
-      .poll(async () => app.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), {
-        timeout: 8000
-      })
+      .poll(
+        async () => app.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length),
+        {
+          timeout: 8000
+        }
+      )
       .toBe(2);
   } finally {
     await closeApp(app);

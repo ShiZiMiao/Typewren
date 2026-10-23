@@ -23,7 +23,12 @@ import { codeBlockLanguageView } from './codeBlockView';
 import { frontmatterSchema, frontmatterView, remarkFrontmatterPlugin } from './frontmatter';
 import { rawHtmlView } from './rawHtml';
 import { detailsSchema, detailsStringifyPlugin, detailsView, remarkDetailsPlugin } from './details';
-import { interactiveQuizRemarkPlugin, interactiveQuizSchema, interactiveQuizStringifyPlugin, interactiveQuizView } from './interactiveQuiz';
+import {
+  interactiveQuizRemarkPlugin,
+  interactiveQuizSchema,
+  interactiveQuizStringifyPlugin,
+  interactiveQuizView
+} from './interactiveQuiz';
 import {
   blockMathEmptyInputRule,
   blockMathFullInputRule,

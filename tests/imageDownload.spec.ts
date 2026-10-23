@@ -243,16 +243,13 @@ test.describe('图片下载 SSRF 拒绝（真实模式）', () => {
 
   for (const [label, url] of DENY_CASES) {
     test(`${label} 在 fetch 前被拒`, async () => {
-      const res = await real.window.evaluate(
-        async (u) => {
-          return (
-            window as unknown as {
-              typewren: { downloadImage: (p: unknown) => Promise<SaveResult> };
-            }
-          ).typewren.downloadImage({ url: u, docPath: null });
-        },
-        url
-      );
+      const res = await real.window.evaluate(async (u) => {
+        return (
+          window as unknown as {
+            typewren: { downloadImage: (p: unknown) => Promise<SaveResult> };
+          }
+        ).typewren.downloadImage({ url: u, docPath: null });
+      }, url);
       expect(res.ok).toBe(false);
       expect(res.error).toContain('不支持本地/内网图片地址');
     });
