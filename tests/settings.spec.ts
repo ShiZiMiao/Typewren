@@ -151,7 +151,9 @@ test.describe('偏好设置', () => {
       autoPairs: true
     };
     await app.window.evaluate((s) => {
-      (window as unknown as { typewren: { setSettings(x: unknown): void } }).typewren.setSettings(s);
+      (window as unknown as { typewren: { setSettings(x: unknown): void } }).typewren.setSettings(
+        s
+      );
     }, profile);
     // 落盘有 300ms 防抖（合并逐击键的设置写），轮询到内容一致
     await expect

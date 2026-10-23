@@ -10,6 +10,7 @@ import {
   closeApp,
   type AppHandle
 } from './helpers';
+import { coverageLaunchEnv, startCoverage } from './coverage';
 
 /* ============================================================
  * 关闭保护（attachCloseGuard）
@@ -30,13 +31,15 @@ let launchSeq = 0;
 async function launchPlain(): Promise<AppHandle> {
   const dataDir = join(WORK_DIR, `ud-${launchSeq++}`);
   const app = await electron.launch({
-    args: [OUT_MAIN, '--headless', `--user-data-dir=${dataDir}`]
+    args: [OUT_MAIN, '--headless', `--user-data-dir=${dataDir}`],
+    env: coverageLaunchEnv()
   });
   const window = await app.firstWindow();
   await window.waitForLoadState('domcontentloaded');
   await window.waitForSelector('.ProseMirror', { timeout: 15000 });
   await window.waitForTimeout(600);
   const handle = { app, window };
+  await startCoverage(app, window);
   await installDialogStubs(handle, { saveAs: null, open: null, discard: 1 });
   return handle;
 }

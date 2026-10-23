@@ -1,10 +1,10 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, _electron as electron } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { launchApp, closeApp, type AppHandle } from './helpers';
+import { OUT_MAIN, installDialogStubs, launchApp, closeApp, type AppHandle } from './helpers';
 
 /* ============================================================
  * 图片下载 / 剪贴板位图落盘（image:download / image:save-from-data）
@@ -206,4 +206,55 @@ test.describe('未保存文档图片落盘到用户数据区', () => {
     expect(savedPath).toBeTruthy();
     expect(existsSync(savedPath)).toBe(true);
   });
+});
+
+// ========== SSRF 拒绝路径（--headless 真实模式；--test 下环回放行验不到） ==========
+
+test.describe('图片下载 SSRF 拒绝（真实模式）', () => {
+  let real: AppHandle;
+
+  test.beforeAll(async () => {
+    // 不带 --test：isTestMode()=false，环回/私有字面 IP 必须在 fetch 前被拒
+    // （拒绝不需要服务器在场——这里根本不该发出网络请求）
+    const dataDir = join(tmpdir(), `typewren-img-ssrf-${process.pid}-${Date.now()}`);
+    const launched = await electron.launch({
+      args: [OUT_MAIN, '--headless', `--user-data-dir=${dataDir}`]
+    });
+    const window = await launched.firstWindow();
+    await window.waitForLoadState('domcontentloaded');
+    await window.waitForSelector('.ProseMirror', { timeout: 15000 });
+    real = { app: launched, window };
+    await installDialogStubs(real, {});
+  });
+
+  test.afterAll(async () => {
+    await closeApp(real);
+  });
+
+  const DENY_CASES: Array<[string, string]> = [
+    ['环回 127.0.0.1', 'http://127.0.0.1:9/ok.png'],
+    ['环回 localhost', 'http://localhost:9/ok.png'],
+    ['环回 IPv6 [::1]', 'http://[::1]:9/ok.png'],
+    ['私有 10.x', 'http://10.0.0.1/x.png'],
+    ['私有 192.168.x', 'http://192.168.1.1/x.png'],
+    ['私有 172.16-31.x', 'http://172.16.0.1/x.png'],
+    ['链路本地（云元数据经典目标）', 'http://169.254.169.254/latest/meta-data']
+  ];
+
+  for (const [label, url] of DENY_CASES) {
+    test(`${label} 在 fetch 前被拒`, async () => {
+      const res = await real.window.evaluate(
+        async (u) => {
+          return (
+            window as unknown as {
+              typewren: { downloadImage: (p: unknown) => Promise<SaveResult> };
+            }
+          ).typewren.downloadImage({ url: u, docPath: null });
+        },
+        url
+      );
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain('不支持本地/内网图片地址');
+    });
+  }
 });

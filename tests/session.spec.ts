@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OUT_MAIN, installDialogStubs, closeApp, type AppHandle } from './helpers';
+import { coverageLaunchEnv, startCoverage } from './coverage';
 
 /* ============================================================
  * 第二档：会话恢复 / 最近文件 / 重复打开询问
@@ -22,13 +23,15 @@ function createDoc(filePath: string, heading: string): void {
 
 async function launch(extraArgs: string[]): Promise<AppHandle> {
   const app = await electron.launch({
-    args: [OUT_MAIN, '--headless', `--user-data-dir=${DATA_DIR}`, ...extraArgs]
+    args: [OUT_MAIN, '--headless', `--user-data-dir=${DATA_DIR}`, ...extraArgs],
+    env: coverageLaunchEnv()
   });
   const window = await app.firstWindow();
   await window.waitForLoadState('domcontentloaded');
   await window.waitForSelector('.ProseMirror', { timeout: 15000 });
   await window.waitForTimeout(300);
   const handle = { app, window };
+  await startCoverage(app, window);
   await installDialogStubs(handle, { discard: 1, confirm: 0 });
   return handle;
 }
