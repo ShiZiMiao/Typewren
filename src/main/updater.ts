@@ -193,7 +193,12 @@ function errorDetail(error: unknown): string {
   return brief.trim() || '未知错误';
 }
 
-/** 让用户确认立即重启安装（更新已就绪时，手动再次「检查更新」也会走到这里） */
+/** 让用户确认立即重启安装（更新已就绪时，手动再次「检查更新」也会走到这里）。
+ *  quitAndInstall(true, true)：静默安装（NSIS /S，不弹安装向导）+ 装后自动启动。
+ *  坑（勿回退）：quitAndInstall 无参 = isSilent=false——oneClick=false 的
+ *  向导式安装包会弹出安装器 UI 让用户点「下一步」（用户反馈"每次更新都要
+ *  手动点安装"）；退出时自动安装（autoInstallOnAppQuit）路径本就走
+ *  install(true, false) 静默，仅此按钮路径需显式传参。 */
 function promptInstall(version: string): void {
   const win = activeWindow();
   if (!win) return;
@@ -210,7 +215,7 @@ function promptInstall(version: string): void {
       cancelId: 1,
       noLink: true
     });
-    if (response === 0) autoUpdater.quitAndInstall();
+    if (response === 0) autoUpdater.quitAndInstall(true, true);
   })();
 }
 

@@ -28,6 +28,8 @@ interface CheckConfig {
 
 interface UpdState {
   quit: number;
+  /** quitAndInstall 实参（断言静默安装：不再弹安装向导） */
+  quitArgs: [boolean | undefined, boolean | undefined] | null;
   opened: string[];
   downloadCalls: number;
   dlgLog: DlgLogItem[];
@@ -44,6 +46,7 @@ async function installUpdStubs(app: ElectronApplication): Promise<void> {
     const g = globalThis as unknown as { __upd: UpdState };
     g.__upd = {
       quit: 0,
+      quitArgs: null,
       opened: [],
       downloadCalls: 0,
       dlgLog: [],
@@ -57,8 +60,9 @@ async function installUpdStubs(app: ElectronApplication): Promise<void> {
     const req = createRequire(process.cwd() + '/__req_base__.js');
     const { autoUpdater } = req('electron-updater') as typeof import('electron-updater');
 
-    autoUpdater.quitAndInstall = () => {
+    autoUpdater.quitAndInstall = (isSilent?: boolean, isForceRunAfter?: boolean) => {
       g.__upd.quit += 1;
+      g.__upd.quitArgs = [isSilent, isForceRunAfter];
     };
     (shell as unknown as { openExternal: (u: string) => void }).openExternal = (u: string) => {
       g.__upd.opened.push(u);
@@ -219,7 +223,9 @@ test('更新主流程：发现新版→下载中再检查→进度→就绪→�
     await expect
       .poll(async () => (await dlgByMessage(handle.app, '已下载完成')).length, { timeout: 5000 })
       .toBe(2);
+    // 静默安装回归：quitAndInstall(true, true) —— NSIS /S 不弹安装向导
     expect((await updState(handle.app)).quit).toBe(1);
+    expect((await updState(handle.app)).quitArgs).toEqual([true, true]);
   } finally {
     await closeApp(handle);
   }
