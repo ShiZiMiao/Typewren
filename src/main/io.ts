@@ -19,8 +19,9 @@ import {
 } from '../shared/ipc';
 import { absolutePathOrEmpty } from '../shared/pathKey';
 import { forceCloseWindow, markWindowDirty, noteCloseFlowAborted } from './closeGuard';
-import { recordRecentFile, setWindowDoc } from './docRegistry';
+import { getWindowDoc, recordRecentFile, setWindowDoc } from './docRegistry';
 import { adoptDraft } from './drafts';
+import { planLinkOpen } from './openLink';
 
 /* ============================================================
  * IPC 注册层（关闭保护在 closeGuard.ts、主题桥在 themeSync.ts）。
@@ -343,5 +344,14 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): void {
     // 只放行受支持的可打开文档路径（拖拽/命令行打开场景，与渲染层过滤口径一致）
     if (typeof filePath !== 'string' || !isOpenablePath(filePath)) return;
     void deps.openFileInNewWindow(winOf(event.sender), filePath);
+  });
+
+  // ---------- Ctrl+点击超链接跳转（相对 md 链接开同目录文档，见 openLink.ts） ----------
+  ipcMain.on('file:open-link', (event, href: unknown) => {
+    const win = winOf(event.sender);
+    const outcome = planLinkOpen(href, win ? getWindowDoc(win) : null);
+    if (outcome.action === 'external') void shell.openExternal(outcome.url);
+    else if (outcome.action === 'open-system') void shell.openPath(outcome.path);
+    else if (outcome.action === 'open-window') void deps.openFileInNewWindow(win, outcome.path);
   });
 }

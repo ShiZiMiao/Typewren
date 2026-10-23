@@ -38,7 +38,10 @@ import {
 import { absolutePathOrEmpty } from '../src/shared/pathKey';
 import { DEFAULT_SETTINGS, sanitizeSettings } from '../src/shared/settings';
 import { parseQuizData } from '../src/renderer/src/editor/quizDataParser';
+import { classifyLinkHref, planLinkOpen } from '../src/main/openLink';
+import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const CSS_SOURCE = readFileSync(
@@ -704,5 +707,137 @@ const quizData = [
       `<script setup>\nconst quizData = [null, 42, 'x', { question: 'q', options: [], correct: [] }]\n</script>`
     );
     expect(data).toEqual([null, 42, 'x', { question: 'q', options: [], correct: [] }]);
+  });
+});
+
+test.describe('classifyLinkHref（Ctrl+点击链接的分类）', () => {
+  test('http/https/mailto 为外链（大小写不敏感，整串透传含 fragment）', () => {
+    expect(classifyLinkHref('https://example.com/a#x')).toEqual({
+      kind: 'external',
+      url: 'https://example.com/a#x'
+    });
+    expect(classifyLinkHref('HTTP://EXAMPLE.COM/p')).toEqual({
+      kind: 'external',
+      url: 'HTTP://EXAMPLE.COM/p'
+    });
+    expect(classifyLinkHref('mailto:a@b.com')).toEqual({
+      kind: 'external',
+      url: 'mailto:a@b.com'
+    });
+  });
+
+  test('未知/危险协议一律忽略（javascript:/data:/ftp:/tel:）', () => {
+    expect(classifyLinkHref('javascript:alert(1)').kind).toBe('ignored');
+    expect(classifyLinkHref('data:text/html,x').kind).toBe('ignored');
+    expect(classifyLinkHref('ftp://example.com/a.md').kind).toBe('ignored');
+    expect(classifyLinkHref('tel:123456').kind).toBe('ignored');
+  });
+
+  test('盘符绝对路径先于 scheme 判定（C:/x 不被当 c: 协议，见 AGENTS #12 同坑）', () => {
+    expect(classifyLinkHref('C:/docs/a.md')).toEqual({ kind: 'local', path: 'C:/docs/a.md' });
+    expect(classifyLinkHref('C:\\docs\\a.md')).toEqual({ kind: 'local', path: 'C:\\docs\\a.md' });
+  });
+
+  test('相对路径：./  ../  子目录 与根路径', () => {
+    expect(classifyLinkHref('./a.md')).toEqual({ kind: 'local', path: './a.md' });
+    expect(classifyLinkHref('../x/b.md')).toEqual({ kind: 'local', path: '../x/b.md' });
+    expect(classifyLinkHref('sub/c.md')).toEqual({ kind: 'local', path: 'sub/c.md' });
+    expect(classifyLinkHref('/rooted/a.md')).toEqual({ kind: 'local', path: '/rooted/a.md' });
+  });
+
+  test('百分号编码撤销（space%20doc.md→space doc.doc）', () => {
+    expect(classifyLinkHref('space%20doc.md')).toEqual({ kind: 'local', path: 'space doc.md' });
+    expect(classifyLinkHref('%E6%96%87%E6%A1%A3.md')).toEqual({ kind: 'local', path: '文档.md' });
+  });
+
+  test('fragment/query 先剥后解码（文件名的字面 # 必须写成 %23 不被截断）', () => {
+    expect(classifyLinkHref('code_guide.md#section')).toEqual({
+      kind: 'local',
+      path: 'code_guide.md'
+    });
+    expect(classifyLinkHref('code_guide.md?v=1')).toEqual({ kind: 'local', path: 'code_guide.md' });
+    expect(classifyLinkHref('a%23b.md')).toEqual({ kind: 'local', path: 'a#b.md' });
+  });
+
+  test('纯锚点/空串/非法转义', () => {
+    expect(classifyLinkHref('#top').kind).toBe('ignored');
+    expect(classifyLinkHref('').kind).toBe('ignored');
+    expect(classifyLinkHref('   ').kind).toBe('ignored');
+    // 裸 %（文件名里的非法转义）解码失败原样透传，不扔异常
+    expect(classifyLinkHref('100%.md')).toEqual({ kind: 'local', path: '100%.md' });
+  });
+});
+
+test.describe('planLinkOpen（链接打开决策，含 fs 存在性/白名单）', () => {
+  const work = mkdtempSync(join(tmpdir(), 'typewren-openlink-unit-'));
+  const doc = join(work, 'index.md');
+  const target = join(work, 'code_guide.md');
+  const sub = join(work, 'sub', 'quiz.md');
+  const img = join(work, 'assets', 'pic.png');
+  const pdf = join(work, 'paper.pdf');
+  const exe = join(work, 'bad.exe');
+  test.beforeAll(() => {
+    writeFileSync(doc, 'x', 'utf-8');
+    writeFileSync(target, 'x', 'utf-8');
+    mkdirSync(join(work, 'sub'), { recursive: true });
+    writeFileSync(sub, 'x', 'utf-8');
+    mkdirSync(join(work, 'assets'), { recursive: true });
+    writeFileSync(img, 'x', 'utf-8');
+    writeFileSync(pdf, 'x', 'utf-8');
+    writeFileSync(exe, 'x', 'utf-8');
+  });
+
+  test('相对 md 链接 → open-window（解析到文档目录下绝对路径）', () => {
+    expect(planLinkOpen('code_guide.md', doc)).toEqual({
+      action: 'open-window',
+      path: resolve(target)
+    });
+  });
+
+  test('带空格/../ 的相对链接解析正确', () => {
+    const spaced = join(work, 'space doc.md');
+    writeFileSync(spaced, 'x', 'utf-8');
+    expect(planLinkOpen('space%20doc.md', doc)).toEqual({
+      action: 'open-window',
+      path: resolve(spaced)
+    });
+    expect(planLinkOpen('sub/../sub/quiz.md', doc)).toEqual({
+      action: 'open-window',
+      path: resolve(sub)
+    });
+  });
+
+  test('子目录与图片/pdf → open-system；.exe 不在白名单 → none', () => {
+    expect(planLinkOpen('sub/quiz.md', doc)).toEqual({
+      action: 'open-window',
+      path: resolve(sub)
+    });
+    expect(planLinkOpen('assets/pic.png', doc)).toEqual({
+      action: 'open-system',
+      path: resolve(img)
+    });
+    expect(planLinkOpen('paper.pdf', doc)).toEqual({
+      action: 'open-system',
+      path: resolve(pdf)
+    });
+    expect(planLinkOpen('bad.exe', doc).action).toBe('none');
+  });
+
+  test('死链/目录/无基准目录（未保存文档）→ none', () => {
+    expect(planLinkOpen('missing.md', doc).action).toBe('none');
+    expect(planLinkOpen('sub', doc).action).toBe('none');
+    expect(planLinkOpen('code_guide.md', null).action).toBe('none');
+    expect(planLinkOpen('code_guide.md', '').action).toBe('none');
+    // 基准必须是绝对路径（注册表登记值本就绝对；防畸形直传）
+    expect(planLinkOpen('code_guide.md', 'relative/doc.md').action).toBe('none');
+  });
+
+  test('外链与非法输入', () => {
+    expect(planLinkOpen('https://example.com/x', doc)).toEqual({
+      action: 'external',
+      url: 'https://example.com/x'
+    });
+    expect(planLinkOpen('javascript:alert(1)', doc).action).toBe('none');
+    expect(planLinkOpen(42, doc).action).toBe('none');
   });
 });

@@ -22,6 +22,7 @@ import type {
   PendingOpenResult,
   SaveAsPayload,
   SaveAsResult,
+  UpdateCheckState,
   UpdateDownloadState
 } from './ipc';
 import type { AppSettings } from './settings';
@@ -110,6 +111,13 @@ export interface TypewrenApi {
    */
   onUpdateDownloadState(callback: (state: UpdateDownloadState) => void): () => void;
 
+  /**
+   * 订阅更新检查状态（手动「检查更新」的开始/结束）。
+   * 提示卡以转圈显示「正在检查更新…」，结果弹框出现即收起。
+   * 返回取消订阅函数。
+   */
+  onUpdateCheckState(callback: (state: UpdateCheckState) => void): () => void;
+
   /** 取消正在进行的更新下载（未在下载时无效果） */
   cancelUpdateDownload(): void;
 
@@ -128,6 +136,13 @@ export interface TypewrenApi {
 
   /** 在新窗口中打开指定文件 */
   openFileInNewWindow(filePath: string): void;
+
+  /**
+   * Ctrl/Cmd+点击编辑器内超链接：主进程按当前文档目录解析相对路径——
+   * md/txt 新窗口打开、图片/pdf 交系统默认程序、http(s)/mailto 交系统浏览器；
+   * 死链/未知协议/目录静默忽略。判断与裁决全在主进程（openLink.ts）。
+   */
+  openLink(href: string): void;
 
   /**
    * 拉取主进程为本窗口登记的“待打开”文件（文件关联/二次启动/新窗口打开/

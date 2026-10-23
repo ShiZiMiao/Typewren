@@ -1,13 +1,16 @@
 /* ============================================================
- * 更新下载提示卡（右下角非模态浮层）
- * 由主进程 updater:download-state 推送驱动：
+ * 更新提示卡（右下角非模态浮层）
+ * 下载：由主进程 updater:download-state 推送驱动：
  * starting → progress（百分比/速度/已下载量）→ done / canceled / error。
  * starting（正在获取安装包，尚无进度数据）显示转圈图标，收到首个
  * download-progress 后切回进度条；下载中可点「取消下载」；
  * done / canceled / error 停留几秒后自动收起。
+ * 检查：updater:check-state 推送——手动「检查更新」点击后先显示
+ * 「正在检查更新…」转圈卡（网络往返无反馈期），结果弹框出现（已最新/
+ * 发现新版/失败）即收起（checked）。
  * ============================================================ */
 
-import type { UpdateDownloadState } from '../../../shared/ipc';
+import type { UpdateCheckState, UpdateDownloadState } from '../../../shared/ipc';
 
 const AUTO_HIDE_MS = 8000;
 
@@ -106,6 +109,23 @@ export class UpdateDownloadToast {
 
     /* ---------- 订阅主进程下载状态（提示卡常驻不销毁，无需退订） ---------- */
     window.typewren.onUpdateDownloadState((state) => this.applyState(state));
+    window.typewren.onUpdateCheckState((state) => this.applyCheckState(state));
+  }
+
+  /** 「检查更新」进行中/结束（手动检查专用；结果框出现后立刻收起） */
+  applyCheckState(state: UpdateCheckState): void {
+    window.clearTimeout(this.hideTimer);
+    this.hideTimer = undefined;
+    if (state.phase === 'checking') {
+      this.titleEl.textContent = '检查更新';
+      this.setFetching(true);
+      this.metaText.textContent = '正在检查更新…';
+      this.cancelBtn.style.display = 'none';
+      // 用户主动点「检查更新」= 明确想看反馈，无视手动静默（检查无进度刷新回弹问题）
+      this.show();
+    } else {
+      this.hide();
+    }
   }
 
   /** 暴露给测试/调试：手动推送一个状态 */

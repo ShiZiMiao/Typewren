@@ -334,6 +334,21 @@ export function isUpdateDownloadState(value: unknown): value is UpdateDownloadSt
   }
 }
 
+/**
+ * 更新检查状态（主进程 → 渲染层 `updater:check-state` 广播）：
+ * checking = 手动「检查更新」已发起（网络往返可能数秒，提示卡先显示
+ * 「正在检查更新…」转圈）；checked = 结果已出（已最新/发现新版/失败弹框
+ * 出现，提示卡收起）。静默自动检查不发此广播。
+ */
+export type UpdateCheckState = { phase: 'checking' } | { phase: 'checked' };
+
+/** 更新检查状态载荷的类型守卫 */
+export function isUpdateCheckState(value: unknown): value is UpdateCheckState {
+  if (typeof value !== 'object' || value === null) return false;
+  const phase = (value as Record<string, unknown>).phase;
+  return phase === 'checking' || phase === 'checked';
+}
+
 /** 页面缩放动作（键位映射与内容区缩放共用；百分比语义见 shared/zoomKeys.ts） */
 export type ZoomAction = 'in' | 'out' | 'reset';
 

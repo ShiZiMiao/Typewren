@@ -49,6 +49,7 @@ import { remarkTocPlugin, tocRefreshPlugin, tocSchema, tocView } from './toc';
 import { imageSrcView } from './imageView';
 import { tableTools } from './tableTools';
 import { taskListToggle } from './taskToggle';
+import { linkOpenPlugin } from './linkOpen';
 import { writingPlugin, WritingModes, type WritingModesLike } from '../ui/writingModes';
 
 /** 写作模式实例的晚绑定槽（createEditor 之后由主装配设置） */
@@ -275,6 +276,8 @@ export async function createEditor(options: CreateEditorOptions): Promise<Editor
     .use(tableScrollView)
     .use(viewEvents)
     .use(emptyDocPlaceholder)
+    // Ctrl/Cmd+点击超链接跳转（主进程裁决，见 linkOpen.ts）
+    .use(linkOpenPlugin)
     .use(writingPlugin(() => writingModesSlot ?? new NullModes()))
     // Tab 插入制表符（否则 PM 默认把焦点移出编辑器）
     .use(tabKeyPlugin)

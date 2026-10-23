@@ -3,7 +3,7 @@ import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import { autoUpdater, CancellationToken } from 'electron-updater';
 
-import type { UpdateDownloadState } from '../shared/ipc';
+import type { UpdateCheckState, UpdateDownloadState } from '../shared/ipc';
 
 /* ============================================================
  * 更新检查：electron-updater（GitHub Releases 提供源）
@@ -60,6 +60,13 @@ function showBox(options: Electron.MessageBoxOptions): void {
 function notifyRenderer(state: UpdateDownloadState): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('updater:download-state', state);
+  }
+}
+
+/** 把「检查更新」进行中/结束状态推送给全部窗口（手动检查才发） */
+function notifyCheckState(state: UpdateCheckState): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('updater:check-state', state);
   }
 }
 
@@ -328,11 +335,15 @@ export async function checkForUpdates(silent = false): Promise<void> {
   if (checkInFlight) return;
   checkInFlight = true;
   registerUpdaterEvents();
+  // 手动检查：先让提示卡显示「正在检查更新…」（网络往返可能数秒，
+  // 之前点完毫无反馈）；结果弹框出现前发 checked 收起（见三处结果框）
+  if (!silent) notifyCheckState({ phase: 'checking' });
   try {
     const result = await autoUpdater.checkForUpdates();
     void markChecked();
     if (result?.isUpdateAvailable !== true) {
       if (!silent) {
+        notifyCheckState({ phase: 'checked' });
         showBox({
           type: 'info',
           title: 'Typewren',
@@ -347,6 +358,7 @@ export async function checkForUpdates(silent = false): Promise<void> {
     if (downloadPhase !== 'idle') return;
     const win = activeWindow();
     if (!win) return;
+    notifyCheckState({ phase: 'checked' });
     // 更新说明先归一成纯文本再进弹框（原生消息框不渲染 HTML/Markdown）。
     // 原生弹框只承载摘要；完整日志经「查看更新日志」开发布页看渲染版式
     const notes = formatReleaseNotes(result.updateInfo.releaseNotes);
@@ -369,6 +381,7 @@ export async function checkForUpdates(silent = false): Promise<void> {
   } catch (error) {
     // 检查本身抛错（网络异常等）：静默模式不打扰；error 事件对检查期错误不再弹框
     if (!silent) {
+      notifyCheckState({ phase: 'checked' });
       showBox({
         type: 'error',
         title: 'Typewren',

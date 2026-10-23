@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
-import { isUpdateDownloadState, type CommandName } from '../shared/ipc';
+import { isUpdateDownloadState, isUpdateCheckState, type CommandName } from '../shared/ipc';
 import { sanitizeSettings } from '../shared/settings';
 import type { TypewrenApi } from '../shared/typewren-api';
 
@@ -85,6 +85,14 @@ const api: TypewrenApi = {
     return () => ipcRenderer.off('updater:download-state', handler);
   },
 
+  onUpdateCheckState: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: unknown): void => {
+      if (isUpdateCheckState(state)) callback(state);
+    };
+    ipcRenderer.on('updater:check-state', handler);
+    return () => ipcRenderer.off('updater:check-state', handler);
+  },
+
   cancelUpdateDownload: () => ipcRenderer.send('updater:cancel-download'),
 
   requestForceClose: () => ipcRenderer.send('win:request-force-close'),
@@ -99,6 +107,8 @@ const api: TypewrenApi = {
   },
 
   openFileInNewWindow: (filePath) => ipcRenderer.send('file:open-in-new-window', filePath),
+
+  openLink: (href) => ipcRenderer.send('file:open-link', href),
 
   takePendingOpen: () => ipcRenderer.invoke('file:take-pending-open'),
 

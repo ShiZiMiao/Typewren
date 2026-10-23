@@ -87,6 +87,11 @@ export function recordRecentFile(filePath: string): void {
   recordRecent(filePath);
 }
 
+/** 查询窗口当前打开的文档绝对路径（未保存/空窗口返回 null） */
+export function getWindowDoc(win: BrowserWindow): string | null {
+  return docPaths.get(win) ?? null;
+}
+
 /** 查找已打开指定文档的窗口（路径归一化后比较） */
 export function findWindowByDoc(filePath: string): BrowserWindow | null {
   const key = pathKey(filePath);

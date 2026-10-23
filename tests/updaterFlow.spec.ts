@@ -22,6 +22,8 @@ interface CheckConfig {
   version: string;
   notes: string;
   errorMessage: string;
+  /** 检查桩的模拟耗时（在途反馈「正在检查更新」的可断言窗口） */
+  delayMs: number;
 }
 
 interface UpdState {
@@ -46,7 +48,7 @@ async function installUpdStubs(app: ElectronApplication): Promise<void> {
       downloadCalls: 0,
       dlgLog: [],
       dlgQueue: [],
-      check: { mode: 'available', version: '9.9.9', notes: '', errorMessage: 'boom' }
+      check: { mode: 'available', version: '9.9.9', notes: '', errorMessage: 'boom', delayMs: 0 }
     };
 
     // evaluate 的 eval 上下文没有 require：经 getBuiltinModule 自建
@@ -64,6 +66,7 @@ async function installUpdStubs(app: ElectronApplication): Promise<void> {
     // 打桩函数在此定义（经 evaluate 传函数无法序列化——只传 JSON 配置）
     autoUpdater.checkForUpdates = (async () => {
       const cfg = g.__upd.check;
+      if (cfg.delayMs > 0) await new Promise((r) => setTimeout(r, cfg.delayMs));
       if (cfg.mode === 'throw') throw new Error(cfg.errorMessage);
       if (cfg.mode === 'none') {
         return { isUpdateAvailable: false, updateInfo: { version: cfg.version } };
@@ -321,6 +324,34 @@ test('更新流程：已最新 / 检查失败（HttpError 头转储截断）', a
     const failed = (await dlgByMessage(app.app, '检查更新失败'))[0];
     expect(failed.detail).toContain('HTTP 500');
     expect(failed.detail).not.toContain('Headers:');
+  } finally {
+    await closeApp(app);
+  }
+});
+
+test('手动检查更新：先显示「正在检查更新」提示卡，出结果后收起', async () => {
+  const app = await launchApp();
+  try {
+    await installUpdStubs(app.app);
+    await forcePackaged(app.app);
+    // 检查耗时 1.5s：给提示卡留可断言窗口（真实网络往返即此窗口）
+    await setCheckConfig(app.app, { mode: 'none', version: '1.0.0', delayMs: 1500 });
+    await queueDialogs(app.app, [0]);
+
+    await clickCheckUpdate(app.app);
+    await expect(app.window.locator('#update-download-panel')).toBeVisible({ timeout: 5000 });
+    await expect(app.window.locator('#update-download-panel .udp-title')).toHaveText('检查更新');
+    await expect(app.window.locator('#update-download-panel .udp-meta')).toHaveText(/正在检查更新/);
+    // 检查期取消下载按钮不出现（检查不可取消）
+    await expect(app.window.locator('#update-download-panel .udp-btn')).toBeHidden();
+
+    // 结果弹框出现（已最新）→ 提示卡收起（不是停 8 秒自动收，而是立刻收）
+    await expect
+      .poll(async () => (await dlgByMessage(app.app, '当前已是最新版本')).length, {
+        timeout: 5000
+      })
+      .toBe(1);
+    await expect(app.window.locator('#update-download-panel')).toBeHidden({ timeout: 5000 });
   } finally {
     await closeApp(app);
   }
