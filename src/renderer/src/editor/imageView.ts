@@ -50,6 +50,11 @@ export function setImageDocDirProvider(provider: () => string | null): void {
   docDirProvider = provider;
 }
 
+/** 当前文档目录提供器（rawHtml/quiz 的图片解析共用，避免另设通道） */
+export function getImageDocDirProvider(): () => string | null {
+  return docDirProvider;
+}
+
 const reapplyFns = new Set<() => void>();
 
 /** 文档目录变化（打开/另存为）后重新解析所有图片引用 */

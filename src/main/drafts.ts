@@ -33,11 +33,7 @@ function draftDir(): string {
  * 键不同，markBaseline 的清草稿逻辑够不着（draftsTaken 闸门仍保留，勿撤）。
  */
 function draftKey(senderId: number, path: string): string {
-  return (
-    createHash('sha1')
-      .update(`${senderId}:${path}`)
-      .digest('hex') + '.json'
-  );
+  return createHash('sha1').update(`${senderId}:${path}`).digest('hex') + '.json';
 }
 
 function enqueueWrite(task: () => Promise<void>): void {
@@ -47,7 +43,11 @@ function enqueueWrite(task: () => Promise<void>): void {
 async function writeDraftFile(senderId: number, record: DraftRecord): Promise<void> {
   try {
     await fsp.mkdir(draftDir(), { recursive: true });
-    await fsp.writeFile(join(draftDir(), draftKey(senderId, record.path)), JSON.stringify(record), 'utf-8');
+    await fsp.writeFile(
+      join(draftDir(), draftKey(senderId, record.path)),
+      JSON.stringify(record),
+      'utf-8'
+    );
   } catch {
     // 草稿是尽力而为的兜底，写失败不打扰用户
   }

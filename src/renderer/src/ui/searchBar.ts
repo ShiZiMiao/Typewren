@@ -165,10 +165,7 @@ class SearchBarController implements SearchBar {
   // ---------- 统一搜索逻辑（渲染模式 + 源码模式） ----------
 
   /** 高亮重扫选项：keepIndex 保持当前序号（夹到新总数）；scroll 控制是否滚到当前匹配 */
-  private doHighlight(
-    keyword: string,
-    opts: { keepIndex?: boolean; scroll?: boolean } = {}
-  ): void {
+  private doHighlight(keyword: string, opts: { keepIndex?: boolean; scroll?: boolean } = {}): void {
     const previousIndex = this.matchIndex;
     this.clearHighlights();
     this.totalMatches = 0;

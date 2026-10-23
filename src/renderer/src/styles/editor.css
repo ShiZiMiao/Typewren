@@ -201,6 +201,52 @@
   font-weight: 700;
 }
 
+/* ---------- details 折叠块（浏览器形式） ---------- */
+.ProseMirror details.typewren-details {
+  margin: 1em 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  padding: 0 16px;
+}
+
+.ProseMirror details.typewren-details > summary {
+  cursor: pointer;
+  padding: 8px 0;
+  user-select: none;
+}
+
+/* Chrome 的 UA 隐藏规则只作用于"直接子内容"的模式，这里显式补齐
+ * （内部内容区是自定义 div） */
+.ProseMirror details.typewren-details:not([open]) > .typewren-details-body {
+  display: none;
+}
+
+.ProseMirror details.typewren-details[open] > summary {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+/* ---------- Raw HTML 块（净化渲染的未知/常规标签无需专用样式；
+ * 渲染出的 <pre>/<table> 等复用既有代码块/表格样式） ---------- */
+
+/* ---------- Front Matter（--- ... --- 元信息，Typora 式卡片） ---------- */
+.typewren-frontmatter {
+  margin: 1em 0;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.typewren-frontmatter .frontmatter-line {
+  line-height: 1.75;
+  /* 与引用块文字同色的灰（用户参照②） */
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ---------- 引用块 ---------- */
 .ProseMirror blockquote {
   margin: 1em 0;
@@ -287,8 +333,8 @@
 .ProseMirror hr {
   border: none;
   border-top: 2px solid var(--border-strong);
-  margin: 1.8em auto;
-  width: 92%;
+  margin: 1.8em 0;
+  width: 100%;
 }
 
 /* ---------- 表格 ---------- */
@@ -455,6 +501,151 @@
 .mermaid-rendered svg {
   max-width: 100%;
   height: auto;
+}
+
+/* ---------- 交互答题卡片（<InteractiveQuiz>，VitePress 组件形态） ---------- */
+.typewren-quiz .quiz-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  padding: 14px 16px;
+  margin: 14px 0;
+}
+
+.typewren-quiz .quiz-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.typewren-quiz .quiz-badge {
+  flex: none;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.typewren-quiz .quiz-question {
+  font-weight: 600;
+}
+
+.typewren-quiz .quiz-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  padding: 10px 14px;
+  margin: 8px 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+
+.typewren-quiz .quiz-option:hover {
+  border-color: var(--accent);
+}
+
+.typewren-quiz .quiz-circle {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  position: relative;
+}
+
+.typewren-quiz .quiz-option.selected .quiz-circle {
+  border-color: var(--accent);
+}
+
+.typewren-quiz .quiz-option.selected .quiz-circle::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.typewren-quiz .quiz-option-label {
+  flex: none;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.typewren-quiz .quiz-option.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.typewren-quiz .quiz-option.correct {
+  border-color: #2fa66f;
+  background: rgba(47, 166, 111, 0.1);
+}
+
+.typewren-quiz .quiz-option.correct .quiz-circle {
+  border-color: #2fa66f;
+}
+
+.typewren-quiz .quiz-option.correct .quiz-circle::after {
+  background: #2fa66f;
+}
+
+.typewren-quiz .quiz-option.wrong {
+  border-color: #d1554f;
+  background: rgba(209, 85, 79, 0.08);
+}
+
+.typewren-quiz .quiz-option.wrong .quiz-circle {
+  border-color: #d1554f;
+}
+
+.typewren-quiz .quiz-option.wrong .quiz-circle::after {
+  background: #d1554f;
+}
+
+/* 解析说明（选中选项后显示；HTML 经公共净化器渲染） */
+.typewren-quiz .quiz-explanation {
+  display: none;
+  margin-top: 12px;
+  border-top: 1px dashed var(--border);
+  padding-top: 10px;
+}
+
+.typewren-quiz .quiz-explanation.visible {
+  display: block;
+}
+
+.typewren-quiz .quiz-explanation-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+
+.typewren-quiz .quiz-explanation-body {
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.typewren-quiz .quiz-explanation-body ul {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+
+.typewren-quiz .quiz-explanation-body strong {
+  font-weight: 700;
 }
 
 /* ---------- 占位提示（空文档） ---------- */

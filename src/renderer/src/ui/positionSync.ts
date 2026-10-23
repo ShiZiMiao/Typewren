@@ -141,7 +141,10 @@ function scrollSourceCaretIntoView(
     const local = (screenPx: number): number => screenPxToLocal(el, screenPx);
     const target =
       align === 'center'
-        ? el.scrollTop + local(rect.top - containerRect.top) - el.clientHeight / 2 + local(rect.height) / 2
+        ? el.scrollTop +
+          local(rect.top - containerRect.top) -
+          el.clientHeight / 2 +
+          local(rect.height) / 2
         : el.scrollTop + local(rect.top - containerRect.top);
     el.scrollTo({ top: Math.max(0, target), behavior });
   }

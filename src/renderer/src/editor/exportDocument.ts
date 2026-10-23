@@ -2,9 +2,6 @@ import hljs from 'highlight.js/lib/common';
 import { parserCtx, type Editor } from '@milkdown/kit/core';
 import { DOMSerializer, type Node as ProseNode } from '@milkdown/kit/prose/model';
 
-import type { FileService } from '@/services/fileService';
-import { dirnamePath } from '@/services/imagePasteService';
-import { currentTheme } from '@/ui/theme';
 import { escapeHtml } from '@/util/escape';
 import { isSafeLinkHref } from '@/util/link';
 import { resolveImageSrc } from '../../../shared/imageUrl';
@@ -49,7 +46,7 @@ function renderFragmentMath(root: HTMLElement): void {
 }
 
 /** Mermaid 图表：把占位节点换成 SVG（渲染是异步的，与导出装配顺序配合） */
-async function renderFragmentMermaid(root: HTMLElement): Promise<void> {
+async function renderFragmentMermaid(root: HTMLElement, theme: string): Promise<void> {
   const blocks = root.querySelectorAll<HTMLElement>('.typewren-mermaid-block');
   await Promise.all(
     Array.from(blocks).map(async (el) => {
@@ -57,7 +54,7 @@ async function renderFragmentMermaid(root: HTMLElement): Promise<void> {
       const rendered = document.createElement('div');
       rendered.className = 'mermaid-rendered';
       try {
-        rendered.innerHTML = await renderMermaidSvg(code);
+        rendered.innerHTML = await renderMermaidSvg(code, theme);
       } catch (error) {
         rendered.innerHTML = `<div class="typewren-math-error">${escapeHtml(String(error))}</div>`;
       }
@@ -135,14 +132,15 @@ export async function buildExportHtml(
   editor: Editor,
   markdown: string,
   title: string,
-  docDir: string | null
+  docDir: string | null,
+  theme: string
 ): Promise<string> {
   const doc: ProseNode = editor.action((ctx) => ctx.get(parserCtx)(markdown));
 
   const content = document.createElement('div');
   content.appendChild(DOMSerializer.fromSchema(doc.type.schema).serializeFragment(doc.content));
   renderFragmentMath(content);
-  await renderFragmentMermaid(content);
+  await renderFragmentMermaid(content, theme);
   fillExportToc(content, doc);
   highlightCodeBlocks(content);
   wrapTables(content);
@@ -151,7 +149,7 @@ export async function buildExportHtml(
   sanitizeLinks(content);
 
   return `<!DOCTYPE html>
-<html lang="zh-CN" data-theme="${currentTheme()}">
+<html lang="zh-CN" data-theme="${escapeHtml(theme)}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -176,20 +174,33 @@ function baseNameWithoutExtension(fileName: string): string {
   return fileName.replace(/\.(md|markdown|mdown)$/i, '');
 }
 
+/** 导出源数据（纯数据，由 commandRouter 从 FileService/主题装配——
+ * editor 层不反向依赖 services/ui） */
+export interface ExportDocSource {
+  /** 文档当前 Markdown */
+  markdown: string;
+  /** 文档文件名（导出默认名取其基础名） */
+  fileName: string;
+  /** 文档目录（./assets/ 相对图片的解析基准）；未保存为 null 原样透传 */
+  docDir: string | null;
+  /** 当前主题（'light' | 'dark'，Mermaid 与页面底色跟随） */
+  theme: string;
+}
+
 /**
  * 导出入口：装配完整 HTML 并交给主进程写盘 / 打印。
  * 失败与取消由主进程对话框与错误框兜底，这里不重复提示。
  */
 export async function exportDocument(
   editor: Editor,
-  fileService: FileService,
+  source: ExportDocSource,
   kind: ExportKind
 ): Promise<void> {
-  const base = baseNameWithoutExtension(fileService.fileName);
+  const base = baseNameWithoutExtension(source.fileName);
   const suggestedName = `${base}.${kind}`;
 
   if (kind === 'docx') {
-    const docxDoc = buildDocxDoc(editor, fileService.currentMarkdown);
+    const docxDoc = buildDocxDoc(editor, source.markdown);
     await window.typewren.exportDocument({
       kind,
       html: '',
@@ -199,21 +210,10 @@ export async function exportDocument(
     return;
   }
 
-  const html = await buildExportHtml(
-    editor,
-    fileService.currentMarkdown,
-    base,
-    docDirOf(fileService)
-  );
+  const html = await buildExportHtml(editor, source.markdown, base, source.docDir, source.theme);
   await window.typewren.exportDocument({
     kind,
     html,
     suggestedName
   });
-}
-
-/** 文档目录（图片相对引用的解析基准）；未保存文档无从解析 → null 原样透传 */
-function docDirOf(fileService: FileService): string | null {
-  const path = fileService.getFilePath();
-  return path ? dirnamePath(path) : null;
 }

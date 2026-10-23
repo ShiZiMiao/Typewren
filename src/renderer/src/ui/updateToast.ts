@@ -2,7 +2,9 @@
  * 更新下载提示卡（右下角非模态浮层）
  * 由主进程 updater:download-state 推送驱动：
  * starting → progress（百分比/速度/已下载量）→ done / canceled / error。
- * 下载中可点「取消下载」；done / canceled / error 停留几秒后自动收起。
+ * starting（正在获取安装包，尚无进度数据）显示转圈图标，收到首个
+ * download-progress 后切回进度条；下载中可点「取消下载」；
+ * done / canceled / error 停留几秒后自动收起。
  * ============================================================ */
 
 import type { UpdateDownloadState } from '../../../shared/ipc';
@@ -25,8 +27,10 @@ function formatBytes(bytes: number): string {
 export class UpdateDownloadToast {
   private panel: HTMLElement;
   private titleEl: HTMLElement;
+  private barEl: HTMLElement;
   private barFill: HTMLElement;
-  private metaEl: HTMLElement;
+  private spinnerEl: HTMLElement;
+  private metaText: HTMLElement;
   private cancelBtn: HTMLButtonElement;
   private hideTimer: number | undefined;
   /** 手动静默标志：用户点「✕ 关闭」后不再被 progress 顶开，
@@ -61,7 +65,11 @@ export class UpdateDownloadToast {
 
     const meta = document.createElement('div');
     meta.className = 'udp-meta';
-    meta.textContent = ' ';
+    const spinner = document.createElement('span');
+    spinner.className = 'udp-spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    const metaText = document.createElement('span');
+    meta.append(spinner, metaText);
 
     const actions = document.createElement('div');
     actions.className = 'udp-actions';
@@ -77,8 +85,10 @@ export class UpdateDownloadToast {
 
     this.panel = panel;
     this.titleEl = title;
+    this.barEl = bar;
     this.barFill = fill;
-    this.metaEl = meta;
+    this.spinnerEl = spinner;
+    this.metaText = metaText;
     this.cancelBtn = cancelBtn;
 
     /* ---------- 交互 ---------- */
@@ -106,22 +116,24 @@ export class UpdateDownloadToast {
     switch (state.phase) {
       case 'starting':
         this.titleEl.textContent = `正在下载更新 v${state.version}`;
-        this.setBar(0, true);
-        this.metaEl.textContent = '正在获取安装包…';
+        this.setFetching(true);
+        this.metaText.textContent = '正在获取安装包…';
         this.cancelBtn.style.display = '';
         this.showUnlessMuted();
         break;
       case 'progress':
         this.titleEl.textContent = `正在下载更新 v${state.version}`;
+        this.setFetching(false);
         this.setBar(state.percent, state.percent <= 0);
-        this.metaEl.textContent = `${state.percent}% · ${formatBytes(state.transferred)} / ${formatBytes(state.total)} · ${formatBytes(state.bytesPerSecond)}/s`;
+        this.metaText.textContent = `${state.percent}% · ${formatBytes(state.transferred)} / ${formatBytes(state.total)} · ${formatBytes(state.bytesPerSecond)}/s`;
         this.cancelBtn.style.display = '';
         this.showUnlessMuted();
         break;
       case 'done':
         this.titleEl.textContent = '更新已就绪';
+        this.setFetching(false);
         this.setBar(100, false);
-        this.metaEl.textContent = `v${state.version} 下载完成，等待安装`;
+        this.metaText.textContent = `v${state.version} 下载完成，等待安装`;
         this.cancelBtn.style.display = 'none';
         this.muted = false;
         this.show();
@@ -129,8 +141,9 @@ export class UpdateDownloadToast {
         break;
       case 'canceled':
         this.titleEl.textContent = '已取消下载';
+        this.setFetching(false);
         this.setBar(0, false);
-        this.metaEl.textContent = '未安装任何更新';
+        this.metaText.textContent = '未安装任何更新';
         this.cancelBtn.style.display = 'none';
         this.muted = false;
         this.show();
@@ -138,14 +151,22 @@ export class UpdateDownloadToast {
         break;
       case 'error':
         this.titleEl.textContent = '更新下载失败';
+        this.setFetching(false);
         this.setBar(0, false);
-        this.metaEl.textContent = state.message || '未知错误';
+        this.metaText.textContent = state.message || '未知错误';
         this.cancelBtn.style.display = 'none';
         this.muted = false;
         this.show();
         this.autoHide();
         break;
     }
+  }
+
+  /** 「正在获取安装包」阶段（尚无真实进度数据）：隐藏进度条、显示转圈图标；
+   *  收到首个 download-progress 后切回进度条 */
+  private setFetching(fetching: boolean): void {
+    this.barEl.style.display = fetching ? 'none' : '';
+    this.spinnerEl.style.display = fetching ? '' : 'none';
   }
 
   private setBar(percent: number, indeterminate: boolean): void {

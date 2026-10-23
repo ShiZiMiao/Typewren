@@ -139,7 +139,11 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): void {
     const win = winOf(event.sender);
     // 限定可打开文档扩展名 + 绝对路径：不限扩展名的话，渲染层被攻破即可
     // 覆写任意绝对路径文件（系统文件/启动项）
-    if (!isFileContentPayload(payload) || !isAbsolute(payload.path) || !isOpenablePath(payload.path)) {
+    if (
+      !isFileContentPayload(payload) ||
+      !isAbsolute(payload.path) ||
+      !isOpenablePath(payload.path)
+    ) {
       return false;
     }
     try {

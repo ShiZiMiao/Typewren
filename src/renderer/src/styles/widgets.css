@@ -382,6 +382,25 @@
   }
 }
 
+/* 正在获取安装包（尚无进度数据）时的转圈图标 */
+#update-download-panel .udp-spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  margin-right: 6px;
+  vertical-align: -2px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: udp-spin 0.8s linear infinite;
+}
+
+@keyframes udp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 #update-download-panel .udp-meta {
   font-size: 12px;
   color: var(--text-muted);

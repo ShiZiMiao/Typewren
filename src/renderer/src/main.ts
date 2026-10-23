@@ -25,7 +25,7 @@ import type { AppLayout } from '@/ui/layout';
 import { activeHeadingIndex, createOutlinePanel } from '@/ui/outlinePanel';
 import { SourceModeController } from '@/ui/sourceMode';
 import { updateStatusBar } from '@/ui/statusBar';
-import { initThemeToggle, setThemePreferenceSink } from '@/ui/theme';
+import { currentTheme, initThemeToggle, setThemePreferenceSink } from '@/ui/theme';
 import { createWritingModes } from '@/ui/writingModes';
 import { createSpellcheck } from '@/ui/spellcheck';
 import { createAutoPairs } from '@/editor/autoPairs';
@@ -51,6 +51,7 @@ import {
   handleImagePaste
 } from '@/services/imagePasteService';
 import { refreshAllImageSrcs, setImageDocDirProvider } from '@/editor/imageView';
+import { setMermaidThemeSource } from '@/editor/mermaid';
 import { registerCommandRouter } from '@/commandRouter';
 import { localStore, sessionStore } from '@/util/storage';
 import { isMarkdownPath } from '../../shared/ipc';
@@ -135,9 +136,7 @@ function debounce<T extends (...args: never[]) => void>(
  * Ctrl+Shift+F 的 key='F' 本就不命中）。
  */
 function isModHotkey(e: KeyboardEvent, code: string, key: string): boolean {
-  return (
-    (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.code === code || e.key === key)
-  );
+  return (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.code === code || e.key === key);
 }
 
 /** 裸 Alt 拦截：Windows 上 Alt 会聚焦窗口菜单栏（哪怕 autoHideMenuBar），
@@ -172,10 +171,7 @@ function initMenubar(layout: AppLayout, getModeStates: () => Record<string, bool
 }
 
 /** 侧边栏（文件 / 大纲 卡片切换 + 收起）状态机；状态持久化供下次启动 */
-function initSidebar(
-  layout: AppLayout,
-  onFilesTab: () => void
-): { toggleSidebar: () => void } {
+function initSidebar(layout: AppLayout, onFilesTab: () => void): { toggleSidebar: () => void } {
   let outlineCollapsed = localStore.get(OUTLINE_KEY) === '1';
   /** 当前激活的侧栏卡片（files | outline） */
   let activeTab = localStore.get(TAB_KEY) === 'files' ? 'files' : 'outline';
@@ -332,8 +328,7 @@ async function restoreSessionState(
         // string | null——这里把"无路径"显式归一 **null** 传入：旧实现归一 ''
         // 与约定不符（isEmptyDocument 判 `filePath === null` 恒假、
         // win:set-path 上报空串被主进程 validDocPath 拒收）。
-        const restorePath =
-          typeof filePath === 'string' && filePath !== '' ? filePath : null;
+        const restorePath = typeof filePath === 'string' && filePath !== '' ? filePath : null;
         await fileService.loadContentFromPath(restorePath as unknown as string, markdown);
         refreshOutline();
       }
@@ -392,6 +387,9 @@ async function bootstrap(): Promise<void> {
     const p = fileServiceRef?.getFilePath();
     return p ? dirnamePath(p) : null;
   });
+  // Mermaid 主题同手法依赖倒置：editor/mermaid 不反向依赖 ui/theme，
+  // 图表配色经提供器跟随应用主题
+  setMermaidThemeSource(currentTheme);
   // 搜索栏同样晚创建：文档变化回调经 ref 晚绑定重扫高亮
   let searchBarRef: SearchBar | null = null;
   const refreshStatusBar = (): void => {

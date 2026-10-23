@@ -4,7 +4,6 @@ import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import { $nodeSchema, $prose, $remark, $view } from '@milkdown/kit/utils';
 
 import { escapeHtml } from '../util/escape';
-import { currentTheme } from '../ui/theme';
 
 /* ============================================================
  * Mermaid 图表支持：```mermaid 代码块 → 图表节点
@@ -97,13 +96,21 @@ function loadMermaid(): Promise<MermaidModule> {
 
 let renderSeq = 0;
 
-/** 渲染 mermaid 源码为 SVG 字符串；初始化为当前主题（亮/暗跟随应用） */
-export async function renderMermaidSvg(code: string): Promise<string> {
+/** 主题提供器：editor 层不反向依赖 ui——由 main.ts 接线 ui/theme 的
+ * currentTheme（与 imageView 的 docDirProvider 同一依赖倒置手法） */
+let themeSource: () => string = () => 'light';
+
+export function setMermaidThemeSource(source: () => string): void {
+  themeSource = source;
+}
+
+/** 渲染 mermaid 源码为 SVG 字符串；theme 缺省取主题提供器（亮/暗跟随应用） */
+export async function renderMermaidSvg(code: string, theme?: string): Promise<string> {
   const mermaid = await loadMermaid();
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
-    theme: currentTheme() === 'dark' ? 'dark' : 'default',
+    theme: (theme ?? themeSource()) === 'dark' ? 'dark' : 'default',
     fontFamily: 'inherit'
   });
   renderSeq += 1;
