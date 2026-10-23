@@ -2,7 +2,15 @@ import { test, expect } from '@playwright/test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { closeApp, launchApp, loadContent, sendCommand, type AppHandle } from './helpers';
+import {
+  closeApp,
+  launchApp,
+  loadContent,
+  readSource,
+  sendCommand,
+  writeSource,
+  type AppHandle
+} from './helpers';
 
 /* ============================================================
  * <InteractiveQuiz …/> 答题卡片回归：
@@ -273,11 +281,12 @@ test('源码往返后卡片就地更新：交互态保留、删除无孤儿 DOM'
   await first.locator('.quiz-option').nth(1).click();
   await expect(first.locator('.quiz-option').nth(1)).toHaveClass(/selected/);
 
-  // 源码模式改无关内容 → 退出（setMarkdown 触发 NodeView.update）
+  // 源码模式改无关内容（尾部追加，落点确定）→ 退出（setMarkdown 触发 NodeView.update）。
+  // 不用"点击源码区 + 打字"：点击落点随字体度量漂移，CI 上曾落进 <script>
+  // 块内把 quizData 语法打坏、数据解析失败整卡归零
   await sendCommand(app, 'view:source');
   await app.window.waitForTimeout(600);
-  await app.window.locator('#source-textarea').click();
-  await app.window.keyboard.type('，无关编辑');
+  await writeSource(app, (await readSource(app)) + '，无关编辑');
   await app.window.waitForTimeout(250);
   await sendCommand(app, 'view:source');
   await app.window.waitForTimeout(600);
