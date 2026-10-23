@@ -32,3 +32,9 @@ Thumbs.db
 
 # ZCode session artifacts
 .zcode/
+
+# 内部文档（内部笔记不对外发布，不入库）
+AGENTS.md
+TESTING.md
+TODO.md
+ROADMAP.md
